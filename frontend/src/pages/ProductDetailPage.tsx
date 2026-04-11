@@ -28,7 +28,16 @@ const ProductDetailPage = () => {
 
   const safePrice = parseFloat(String(product.price)) || 0;
   const safeStock = parseInt(String(product.stock), 10) || 0;
-  const specs = product.specs as Record<string, string> | null;
+
+  // Safely parse specs — may arrive as a JSON string from the API
+  let specs: Record<string, string> | null = null;
+  if (product.specs) {
+    if (typeof product.specs === "string") {
+      try { specs = JSON.parse(product.specs); } catch { specs = null; }
+    } else if (typeof product.specs === "object") {
+      specs = product.specs as Record<string, string>;
+    }
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">

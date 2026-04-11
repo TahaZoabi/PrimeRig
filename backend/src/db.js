@@ -8,7 +8,6 @@
 const mysql = require("mysql2/promise");
 require("dotenv").config();
 
-// Create a connection pool (max 10 connections by default)
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   port: Number(process.env.DB_PORT) || 3306,
@@ -18,19 +17,19 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // Return JS Date objects instead of strings
   dateStrings: false,
-  // Parse JSON columns automatically
+  // mysql2 reports JSON columns as type "BLOB", not "JSON".
+  // We match by column NAME instead so "specs" is always parsed correctly.
   typeCast: function (field, next) {
-    if (field.type === "JSON") {
+    if (field.name === "specs") {
       const val = field.string();
-      return val ? JSON.parse(val) : null;
+      if (!val) return null;
+      try { return JSON.parse(val); } catch { return null; }
     }
     return next();
   },
 });
 
-// Test the connection on startup
 pool
   .getConnection()
   .then((conn) => {
