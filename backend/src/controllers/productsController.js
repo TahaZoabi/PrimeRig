@@ -239,14 +239,20 @@ const getAdminProducts = async (req, res, next) => {
  */
 function shapeProduct(row) {
   const { category_name, supplier_name, ...rest } = row;
+
+  // Parse specs — may arrive as a raw JSON string if typeCast missed it
+  let specs = rest.specs;
+  if (typeof specs === "string") {
+    try { specs = JSON.parse(specs); } catch { specs = null; }
+  }
+
   return {
     ...rest,
-    // Cast MySQL DECIMAL → JS number
-    price:   parseFloat(rest.price)   || 0,
-    stock:   parseInt(rest.stock, 10) || 0,
-    wattage: parseInt(rest.wattage, 10) || 0,
-    // is_active comes as 0/1 tinyint — normalise to boolean
+    price:     parseFloat(rest.price)    || 0,
+    stock:     parseInt(rest.stock, 10)  || 0,
+    wattage:   parseInt(rest.wattage, 10) || 0,
     is_active: Boolean(rest.is_active),
+    specs,
     categories: category_name ? { name: category_name } : null,
     suppliers:  supplier_name ? { name: supplier_name } : null,
   };
