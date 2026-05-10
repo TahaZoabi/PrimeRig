@@ -18,7 +18,14 @@ interface ProductCardProps {
   category?: string | null;
 }
 
-const ProductCard = ({ id, name, price, image_url, stock, category }: ProductCardProps) => {
+const ProductCard = ({
+  id,
+  name,
+  price,
+  image_url,
+  stock,
+  category,
+}: ProductCardProps) => {
   const { addToCart } = useCart();
   // Defensively cast — MySQL DECIMAL can arrive as string if not cast server-side
   const safePrice = parseFloat(String(price)) || 0;
@@ -34,11 +41,17 @@ const ProductCard = ({ id, name, price, image_url, stock, category }: ProductCar
               src={image_url}
               alt={name}
               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src =
+                  "/images/products/placeholder.jpg";
+              }}
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              No Image
-            </div>
+            <img
+              src="/images/products/placeholder.jpg"
+              alt={name}
+              className="h-full w-full object-cover"
+            />
           )}
         </div>
       </Link>
@@ -60,8 +73,12 @@ const ProductCard = ({ id, name, price, image_url, stock, category }: ProductCar
 
         {/* Price + stock row */}
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-lg font-bold text-primary">${safePrice.toFixed(2)}</span>
-          <span className={`text-xs font-medium ${safeStock > 0 ? "text-green-600" : "text-destructive"}`}>
+          <span className="text-lg font-bold text-primary">
+            ${safePrice.toFixed(2)}
+          </span>
+          <span
+            className={`text-xs font-medium ${safeStock > 0 ? "text-green-600" : "text-destructive"}`}
+          >
             {safeStock > 0 ? `${safeStock} in stock` : "Out of stock"}
           </span>
         </div>

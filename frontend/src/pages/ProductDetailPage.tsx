@@ -33,7 +33,11 @@ const ProductDetailPage = () => {
   let specs: Record<string, string> | null = null;
   if (product.specs) {
     if (typeof product.specs === "string") {
-      try { specs = JSON.parse(product.specs); } catch { specs = null; }
+      try {
+        specs = JSON.parse(product.specs);
+      } catch {
+        specs = null;
+      }
     } else if (typeof product.specs === "object") {
       specs = product.specs as Record<string, string>;
     }
@@ -44,17 +48,15 @@ const ProductDetailPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
         {/* ── Product Image ── */}
         <div className="aspect-square overflow-hidden rounded-xl bg-muted">
-          {product.image_url ? (
-            <img
-              src={product.image_url}
-              alt={product.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground text-lg">
-              No Image
-            </div>
-          )}
+          <img
+            src={product.image_url || "/images/products/placeholder.jpg"}
+            alt={product.name}
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src =
+                "/images/products/placeholder.jpg";
+            }}
+          />
         </div>
 
         {/* ── Product Details ── */}
@@ -66,8 +68,12 @@ const ProductDetailPage = () => {
             </Badge>
           )}
 
-          <h1 className="font-display text-3xl font-bold mb-2">{product.name}</h1>
-          <p className="text-3xl font-bold text-primary mb-4">${safePrice.toFixed(2)}</p>
+          <h1 className="font-display text-3xl font-bold mb-2">
+            {product.name}
+          </h1>
+          <p className="text-3xl font-bold text-primary mb-4">
+            ${safePrice.toFixed(2)}
+          </p>
 
           {/* Stock + supplier row */}
           <div className="flex items-center gap-3 mb-6 flex-wrap">
@@ -87,7 +93,9 @@ const ProductDetailPage = () => {
 
           {/* Description */}
           {product.description && (
-            <p className="text-muted-foreground mb-6 leading-relaxed">{product.description}</p>
+            <p className="text-muted-foreground mb-6 leading-relaxed">
+              {product.description}
+            </p>
           )}
 
           {/* PC-builder compatibility fields */}
@@ -108,7 +116,8 @@ const ProductDetailPage = () => {
           )}
           {product.form_factor && (
             <p className="text-sm mb-4">
-              <span className="font-medium">Form Factor:</span> {product.form_factor}
+              <span className="font-medium">Form Factor:</span>{" "}
+              {product.form_factor}
             </p>
           )}
 
@@ -138,7 +147,9 @@ const ProductDetailPage = () => {
               >
                 <Minus className="h-4 w-4" />
               </Button>
-              <span className="px-4 font-medium min-w-[2rem] text-center">{qty}</span>
+              <span className="px-4 font-medium min-w-[2rem] text-center">
+                {qty}
+              </span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -152,7 +163,9 @@ const ProductDetailPage = () => {
               size="lg"
               className="flex-1"
               disabled={safeStock <= 0 || addToCart.isPending}
-              onClick={() => addToCart.mutate({ productId: product.id, quantity: qty })}
+              onClick={() =>
+                addToCart.mutate({ productId: product.id, quantity: qty })
+              }
             >
               <ShoppingCart className="mr-2 h-5 w-5" /> Add to Cart
             </Button>
