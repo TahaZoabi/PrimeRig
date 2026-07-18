@@ -6,7 +6,13 @@
  * via the Axios interceptor in lib/api.ts.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
 import { authApi } from "@/lib/api";
 
 export interface AuthUser {
@@ -23,20 +29,25 @@ interface AuthContextType {
   isAdmin: boolean;
   loading: boolean;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<AuthUser>;
   signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser]       = useState<AuthUser | null>(null);
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   /** Fetch the current user from the API using the stored token */
   const fetchMe = useCallback(async () => {
     const token = localStorage.getItem("token");
-    if (!token) { setLoading(false); return; }
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     try {
       const { data } = await authApi.me();
       setUser(data);
@@ -49,10 +60,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // On mount, restore session from token in localStorage
-  useEffect(() => { fetchMe(); }, [fetchMe]);
+  useEffect(() => {
+    fetchMe();
+  }, [fetchMe]);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { data } = await authApi.register({ email, password, full_name: fullName });
+    const { data } = await authApi.register({
+      email,
+      password,
+      full_name: fullName,
+    });
     localStorage.setItem("token", data.token);
     setUser(data.user);
   };
@@ -61,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data } = await authApi.login({ email, password });
     localStorage.setItem("token", data.token);
     setUser(data.user);
+    return data.user;
   };
 
   const signOut = () => {
@@ -69,14 +87,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      isAdmin: user?.role === "admin",
-      loading,
-      signUp,
-      signIn,
-      signOut,
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAdmin: user?.role === "admin",
+        loading,
+        signUp,
+        signIn,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
