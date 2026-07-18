@@ -30,7 +30,7 @@ api.interceptors.response.use(
       localStorage.removeItem("token");
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 export default api;
@@ -44,14 +44,16 @@ export const authApi = {
   login: (data: { email: string; password: string }) =>
     api.post("/auth/login", data),
   me: () => api.get("/auth/me"),
-  updateProfile: (data: { full_name?: string; phone?: string; address?: string }) =>
-    api.put("/auth/profile", data),
+  updateProfile: (data: {
+    full_name?: string;
+    phone?: string;
+    address?: string;
+  }) => api.put("/auth/profile", data),
 };
 
 // Products
 export const productsApi = {
-  list: (params?: Record<string, string>) =>
-    api.get("/products", { params }),
+  list: (params?: Record<string, string>) => api.get("/products", { params }),
   builder: () => api.get("/products/builder"),
   get: (id: string) => api.get(`/products/${id}`),
   adminList: () => api.get("/admin/products"),
@@ -91,7 +93,17 @@ export const ordersApi = {
   myOrders: () => api.get("/orders"),
   create: (data: { shippingAddress: string; paymentMethod: string }) =>
     api.post("/orders", data),
-  adminList: () => api.get("/admin/orders"),
+  adminList: (params?: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => api.get("/admin/orders", { params }),
   updateStatus: (id: string, status: string) =>
     api.put(`/admin/orders/${id}/status`, { status }),
+};
+
+// Admin dashboard stats
+export const adminStatsApi = {
+  get: (params: { period: string; startDate?: string; endDate?: string }) =>
+    api.get("/admin/stats", { params }),
 };
