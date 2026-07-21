@@ -58,11 +58,23 @@ router.delete(
   requireAdmin,
   products.deleteProduct,
 );
+router.put(
+  "/admin/products/:id/restore",
+  authenticate,
+  requireAdmin,
+  products.restoreProduct,
+);
 
 // ============================================================
 // CATEGORIES ROUTES
 // ============================================================
 router.get("/categories", categories.getCategories);
+router.get(
+  "/admin/categories",
+  authenticate,
+  requireAdmin,
+  categories.getAdminCategories,
+);
 router.post(
   "/categories",
   authenticate,
@@ -81,11 +93,23 @@ router.delete(
   requireAdmin,
   categories.deleteCategory,
 );
+router.put(
+  "/admin/categories/:id/restore",
+  authenticate,
+  requireAdmin,
+  categories.restoreCategory,
+);
 
 // ============================================================
 // SUPPLIERS ROUTES
 // ============================================================
 router.get("/suppliers", suppliers.getSuppliers);
+router.get(
+  "/admin/suppliers",
+  authenticate,
+  requireAdmin,
+  suppliers.getAdminSuppliers,
+);
 router.post("/suppliers", authenticate, requireAdmin, suppliers.createSupplier);
 router.put(
   "/suppliers/:id",
@@ -98,6 +122,12 @@ router.delete(
   authenticate,
   requireAdmin,
   suppliers.deleteSupplier,
+);
+router.put(
+  "/admin/suppliers/:id/restore",
+  authenticate,
+  requireAdmin,
+  suppliers.restoreSupplier,
 );
 
 // ============================================================

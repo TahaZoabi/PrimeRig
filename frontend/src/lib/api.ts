@@ -60,22 +60,27 @@ export const productsApi = {
   create: (data: object) => api.post("/admin/products", data),
   update: (id: string, data: object) => api.put(`/admin/products/${id}`, data),
   delete: (id: string) => api.delete(`/admin/products/${id}`),
+  restore: (id: string) => api.put(`/admin/products/${id}/restore`),
 };
 
 // Categories
 export const categoriesApi = {
   list: () => api.get("/categories"),
+  adminList: () => api.get("/admin/categories"),
   create: (data: object) => api.post("/categories", data),
   update: (id: string, data: object) => api.put(`/categories/${id}`, data),
   delete: (id: string) => api.delete(`/categories/${id}`),
+  restore: (id: string) => api.put(`/admin/categories/${id}/restore`),
 };
 
 // Suppliers
 export const suppliersApi = {
   list: () => api.get("/suppliers"),
+  adminList: () => api.get("/admin/suppliers"),
   create: (data: object) => api.post("/suppliers", data),
   update: (id: string, data: object) => api.put(`/suppliers/${id}`, data),
   delete: (id: string) => api.delete(`/suppliers/${id}`),
+  restore: (id: string) => api.put(`/admin/suppliers/${id}/restore`),
 };
 
 // Cart
