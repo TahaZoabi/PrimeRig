@@ -14,10 +14,10 @@ import { toast } from "sonner";
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail]     = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
@@ -27,9 +27,9 @@ const AuthPage = () => {
     setLoading(true);
     try {
       if (isLogin) {
-        await signIn(email, password);
+        const loggedInUser = await signIn(email, password);
         toast.success("Welcome back!");
-        navigate("/");
+        navigate(loggedInUser.role === "admin" ? "/admin" : "/");
       } else {
         await signUp(email, password, fullName);
         toast.success("Account created! You are now signed in.");
@@ -38,7 +38,8 @@ const AuthPage = () => {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An error occurred";
       // Axios wraps server error in err.response.data.error
-      const serverMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const serverMsg = (err as { response?: { data?: { error?: string } } })
+        ?.response?.data?.error;
       toast.error(serverMsg || msg);
     } finally {
       setLoading(false);

@@ -9,65 +9,156 @@ const router = require("express").Router();
 const { authenticate, requireAdmin } = require("../middleware/auth");
 
 // --- Controllers ---
-const auth       = require("../controllers/authController");
-const products   = require("../controllers/productsController");
+const auth = require("../controllers/authController");
+const products = require("../controllers/productsController");
 const categories = require("../controllers/categoriesController");
-const suppliers  = require("../controllers/suppliersController");
-const cart       = require("../controllers/cartController");
-const orders     = require("../controllers/ordersController");
+const suppliers = require("../controllers/suppliersController");
+const cart = require("../controllers/cartController");
+const orders = require("../controllers/ordersController");
+const adminStats = require("../controllers/adminStatsController");
 
 // ============================================================
 // AUTH ROUTES
 // ============================================================
 router.post("/auth/register", auth.register);
-router.post("/auth/login",    auth.login);
-router.get ("/auth/me",       authenticate, auth.getMe);
-router.put ("/auth/profile",  authenticate, auth.updateProfile);
+router.post("/auth/login", auth.login);
+router.get("/auth/me", authenticate, auth.getMe);
+router.put("/auth/profile", authenticate, auth.updateProfile);
 
 // ============================================================
 // PRODUCT ROUTES
 // ============================================================
 // Public routes
-router.get("/products",          products.getProducts);
-router.get("/products/builder",  products.getBuilderProducts);
-router.get("/products/:id",      products.getProduct);
+router.get("/products", products.getProducts);
+router.get("/products/builder", products.getBuilderProducts);
+router.get("/products/:id", products.getProduct);
 
 // Admin routes  (admin must come after public to avoid matching "builder" as an :id)
-router.get   ("/admin/products",     authenticate, requireAdmin, products.getAdminProducts);
-router.post  ("/admin/products",     authenticate, requireAdmin, products.createProduct);
-router.put   ("/admin/products/:id", authenticate, requireAdmin, products.updateProduct);
-router.delete("/admin/products/:id", authenticate, requireAdmin, products.deleteProduct);
+router.get(
+  "/admin/products",
+  authenticate,
+  requireAdmin,
+  products.getAdminProducts,
+);
+router.post(
+  "/admin/products",
+  authenticate,
+  requireAdmin,
+  products.createProduct,
+);
+router.put(
+  "/admin/products/:id",
+  authenticate,
+  requireAdmin,
+  products.updateProduct,
+);
+router.delete(
+  "/admin/products/:id",
+  authenticate,
+  requireAdmin,
+  products.deleteProduct,
+);
+router.put(
+  "/admin/products/:id/restore",
+  authenticate,
+  requireAdmin,
+  products.restoreProduct,
+);
 
 // ============================================================
 // CATEGORIES ROUTES
 // ============================================================
-router.get   ("/categories",      categories.getCategories);
-router.post  ("/categories",      authenticate, requireAdmin, categories.createCategory);
-router.put   ("/categories/:id",  authenticate, requireAdmin, categories.updateCategory);
-router.delete("/categories/:id",  authenticate, requireAdmin, categories.deleteCategory);
+router.get("/categories", categories.getCategories);
+router.get(
+  "/admin/categories",
+  authenticate,
+  requireAdmin,
+  categories.getAdminCategories,
+);
+router.post(
+  "/categories",
+  authenticate,
+  requireAdmin,
+  categories.createCategory,
+);
+router.put(
+  "/categories/:id",
+  authenticate,
+  requireAdmin,
+  categories.updateCategory,
+);
+router.delete(
+  "/categories/:id",
+  authenticate,
+  requireAdmin,
+  categories.deleteCategory,
+);
+router.put(
+  "/admin/categories/:id/restore",
+  authenticate,
+  requireAdmin,
+  categories.restoreCategory,
+);
 
 // ============================================================
 // SUPPLIERS ROUTES
 // ============================================================
-router.get   ("/suppliers",      suppliers.getSuppliers);
-router.post  ("/suppliers",      authenticate, requireAdmin, suppliers.createSupplier);
-router.put   ("/suppliers/:id",  authenticate, requireAdmin, suppliers.updateSupplier);
-router.delete("/suppliers/:id",  authenticate, requireAdmin, suppliers.deleteSupplier);
+router.get("/suppliers", suppliers.getSuppliers);
+router.get(
+  "/admin/suppliers",
+  authenticate,
+  requireAdmin,
+  suppliers.getAdminSuppliers,
+);
+router.post("/suppliers", authenticate, requireAdmin, suppliers.createSupplier);
+router.put(
+  "/suppliers/:id",
+  authenticate,
+  requireAdmin,
+  suppliers.updateSupplier,
+);
+router.delete(
+  "/suppliers/:id",
+  authenticate,
+  requireAdmin,
+  suppliers.deleteSupplier,
+);
+router.put(
+  "/admin/suppliers/:id/restore",
+  authenticate,
+  requireAdmin,
+  suppliers.restoreSupplier,
+);
 
 // ============================================================
 // CART ROUTES (all authenticated)
 // ============================================================
-router.get   ("/cart",            authenticate, cart.getCart);
-router.post  ("/cart",            authenticate, cart.addToCart);
-router.put   ("/cart/:itemId",    authenticate, cart.updateCartItem);
-router.delete("/cart",            authenticate, cart.clearCart);
+router.get("/cart", authenticate, cart.getCart);
+router.post("/cart", authenticate, cart.addToCart);
+router.put("/cart/:itemId", authenticate, cart.updateCartItem);
+router.delete("/cart", authenticate, cart.clearCart);
 
 // ============================================================
 // ORDER ROUTES
 // ============================================================
-router.get ("/orders",                    authenticate, orders.getMyOrders);
-router.post("/orders",                    authenticate, orders.createOrder);
-router.get ("/admin/orders",              authenticate, requireAdmin, orders.getAllOrders);
-router.put ("/admin/orders/:id/status",   authenticate, requireAdmin, orders.updateOrderStatus);
+router.get("/orders", authenticate, orders.getMyOrders);
+router.post("/orders", authenticate, orders.createOrder);
+router.get("/admin/orders", authenticate, requireAdmin, orders.getAllOrders);
+router.put(
+  "/admin/orders/:id/status",
+  authenticate,
+  requireAdmin,
+  orders.updateOrderStatus,
+);
+
+// ============================================================
+// ADMIN DASHBOARD STATS
+// ============================================================
+router.get(
+  "/admin/stats",
+  authenticate,
+  requireAdmin,
+  adminStats.getDashboardStats,
+);
 
 module.exports = router;

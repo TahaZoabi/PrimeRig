@@ -30,7 +30,7 @@ api.interceptors.response.use(
       localStorage.removeItem("token");
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 export default api;
@@ -44,36 +44,43 @@ export const authApi = {
   login: (data: { email: string; password: string }) =>
     api.post("/auth/login", data),
   me: () => api.get("/auth/me"),
-  updateProfile: (data: { full_name?: string; phone?: string; address?: string }) =>
-    api.put("/auth/profile", data),
+  updateProfile: (data: {
+    full_name?: string;
+    phone?: string;
+    address?: string;
+  }) => api.put("/auth/profile", data),
 };
 
 // Products
 export const productsApi = {
-  list: (params?: Record<string, string>) =>
-    api.get("/products", { params }),
+  list: (params?: Record<string, string>) => api.get("/products", { params }),
   builder: () => api.get("/products/builder"),
   get: (id: string) => api.get(`/products/${id}`),
   adminList: () => api.get("/admin/products"),
   create: (data: object) => api.post("/admin/products", data),
   update: (id: string, data: object) => api.put(`/admin/products/${id}`, data),
   delete: (id: string) => api.delete(`/admin/products/${id}`),
+  restore: (id: string) => api.put(`/admin/products/${id}/restore`),
 };
 
 // Categories
 export const categoriesApi = {
   list: () => api.get("/categories"),
+  adminList: () => api.get("/admin/categories"),
   create: (data: object) => api.post("/categories", data),
   update: (id: string, data: object) => api.put(`/categories/${id}`, data),
   delete: (id: string) => api.delete(`/categories/${id}`),
+  restore: (id: string) => api.put(`/admin/categories/${id}/restore`),
 };
 
 // Suppliers
 export const suppliersApi = {
   list: () => api.get("/suppliers"),
+  adminList: () => api.get("/admin/suppliers"),
   create: (data: object) => api.post("/suppliers", data),
   update: (id: string, data: object) => api.put(`/suppliers/${id}`, data),
   delete: (id: string) => api.delete(`/suppliers/${id}`),
+  restore: (id: string) => api.put(`/admin/suppliers/${id}/restore`),
 };
 
 // Cart
@@ -91,7 +98,17 @@ export const ordersApi = {
   myOrders: () => api.get("/orders"),
   create: (data: { shippingAddress: string; paymentMethod: string }) =>
     api.post("/orders", data),
-  adminList: () => api.get("/admin/orders"),
+  adminList: (params?: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => api.get("/admin/orders", { params }),
   updateStatus: (id: string, status: string) =>
     api.put(`/admin/orders/${id}/status`, { status }),
+};
+
+// Admin dashboard stats
+export const adminStatsApi = {
+  get: (params: { period: string; startDate?: string; endDate?: string }) =>
+    api.get("/admin/stats", { params }),
 };
