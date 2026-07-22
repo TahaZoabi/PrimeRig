@@ -8,6 +8,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
+const { logActivity } = require("../utils/activityLog");
 
 /**
  * Is there already a product with this name for this supplier, ignoring
@@ -197,6 +198,7 @@ const createProduct = async (req, res, next) => {
        WHERE p.id = ?`,
       [id],
     );
+    logActivity("product", `Product "${name.trim()}" was added`);
     res.status(201).json(shapeProduct(rows[0]));
   } catch (err) {
     next(err);
@@ -265,6 +267,7 @@ const updateProduct = async (req, res, next) => {
         req.params.id,
       ],
     );
+    logActivity("product", `Product "${name.trim()}" was updated`);
     res.json({ message: "Product updated" });
   } catch (err) {
     next(err);
@@ -278,10 +281,15 @@ const updateProduct = async (req, res, next) => {
  */
 const deleteProduct = async (req, res, next) => {
   try {
+    const [[prod]] = await pool.query(
+      "SELECT name FROM products WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE products SET is_active = 0, archived_at = NOW() WHERE id = ?",
       [req.params.id],
     );
+    if (prod) logActivity("product", `Product "${prod.name}" was archived`);
     res.json({ message: "Product archived" });
   } catch (err) {
     next(err);
@@ -291,10 +299,15 @@ const deleteProduct = async (req, res, next) => {
 /** PUT /api/admin/products/:id/restore  (admin) — reactivate an archived product */
 const restoreProduct = async (req, res, next) => {
   try {
+    const [[prod]] = await pool.query(
+      "SELECT name FROM products WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE products SET is_active = 1, archived_at = NULL WHERE id = ?",
       [req.params.id],
     );
+    if (prod) logActivity("product", `Product "${prod.name}" was restored`);
     res.json({ message: "Product restored" });
   } catch (err) {
     next(err);

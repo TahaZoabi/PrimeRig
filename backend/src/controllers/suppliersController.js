@@ -12,6 +12,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
+const { logActivity } = require("../utils/activityLog");
 
 /** GET /api/suppliers  (public — active only) */
 const getSuppliers = async (req, res, next) => {
@@ -69,6 +70,7 @@ const createSupplier = async (req, res, next) => {
     const [rows] = await pool.query("SELECT * FROM suppliers WHERE id = ?", [
       id,
     ]);
+    logActivity("supplier", `Supplier "${name.trim()}" was added`);
     res.status(201).json(rows[0]);
   } catch (err) {
     next(err);
@@ -103,10 +105,15 @@ const updateSupplier = async (req, res, next) => {
  */
 const deleteSupplier = async (req, res, next) => {
   try {
+    const [[sup]] = await pool.query(
+      "SELECT name FROM suppliers WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE suppliers SET is_active = 0, archived_at = NOW() WHERE id = ?",
       [req.params.id],
     );
+    if (sup) logActivity("supplier", `Supplier "${sup.name}" was archived`);
     res.json({ message: "Supplier archived" });
   } catch (err) {
     next(err);
@@ -116,10 +123,15 @@ const deleteSupplier = async (req, res, next) => {
 /** PUT /api/admin/suppliers/:id/restore  (admin) — bring back an archived supplier */
 const restoreSupplier = async (req, res, next) => {
   try {
+    const [[sup]] = await pool.query(
+      "SELECT name FROM suppliers WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE suppliers SET is_active = 1, archived_at = NULL WHERE id = ?",
       [req.params.id],
     );
+    if (sup) logActivity("supplier", `Supplier "${sup.name}" was restored`);
     res.json({ message: "Supplier restored" });
   } catch (err) {
     next(err);

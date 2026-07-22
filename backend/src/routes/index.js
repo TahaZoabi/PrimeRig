@@ -16,6 +16,7 @@ const suppliers = require("../controllers/suppliersController");
 const cart = require("../controllers/cartController");
 const orders = require("../controllers/ordersController");
 const adminStats = require("../controllers/adminStatsController");
+const activity = require("../controllers/activityController");
 
 // ============================================================
 // AUTH ROUTES
@@ -159,6 +160,16 @@ router.get(
   authenticate,
   requireAdmin,
   adminStats.getDashboardStats,
+);
+
+// ============================================================
+// RECENT ACTIVITY
+// ============================================================
+router.get(
+  "/admin/activity",
+  authenticate,
+  requireAdmin,
+  activity.getRecentActivity,
 );
 
 module.exports = router;

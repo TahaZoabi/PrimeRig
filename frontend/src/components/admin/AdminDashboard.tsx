@@ -17,6 +17,7 @@ import PeriodFilter, {
   type Period,
   type PeriodOption,
 } from "@/components/admin/PeriodFilter";
+import RecentActivity from "@/components/admin/RecentActivity";
 import type { PeriodFilterState } from "@/pages/AdminPage";
 import {
   ShoppingBag,
@@ -33,6 +34,14 @@ import {
   Tag,
   Receipt,
   RefreshCw,
+  FolderTree,
+  Truck,
+  Archive,
+  Flame,
+  Star,
+  Rocket,
+  XCircle,
+  PackageX,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -43,6 +52,8 @@ import {
   PieChart,
   Pie,
   Cell,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -72,6 +83,14 @@ const CATEGORY_COLORS = [
   "hsl(160 60% 40%)",
 ];
 
+const STATUS_COLORS: Record<string, string> = {
+  pending: "hsl(45 93% 55%)",
+  processing: "hsl(220 90% 55%)",
+  shipped: "hsl(265 80% 60%)",
+  delivered: "hsl(142 71% 45%)",
+  cancelled: "hsl(0 84% 60%)",
+};
+
 const statusStyle: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
   processing: "bg-blue-100   text-blue-800   border-blue-200",
@@ -85,6 +104,10 @@ interface SeriesPoint {
   revenue: number;
   orders: number;
 }
+interface NewCustomerPoint {
+  date: string;
+  newCustomers: number;
+}
 interface TopProduct {
   id: string;
   name: string;
@@ -95,6 +118,13 @@ interface CategorySale {
   id: string;
   name: string;
   unitsSold: number;
+  revenue: number;
+}
+interface SupplierSale {
+  id: string;
+  name: string;
+  unitsSold: number;
+  revenue: number;
 }
 interface RecentOrder {
   id: string;
@@ -108,6 +138,7 @@ interface StockItem {
   name: string;
   stock?: number;
   category: string | null;
+  supplier: string | null;
 }
 interface MostActive {
   id: string;
@@ -115,6 +146,10 @@ interface MostActive {
   email: string;
   orderCount: number;
   totalSpent: number;
+}
+interface WindowTop {
+  name: string;
+  unitsSold: number;
 }
 
 interface DashboardStats {
@@ -132,6 +167,17 @@ interface DashboardStats {
     revenuePerDay: number;
     ordersPerDay: number;
   };
+  totals: {
+    revenueAllTime: number;
+    ordersAllTime: number;
+    totalCustomers: number;
+    activeProducts: number;
+    archivedProducts: number;
+    activeCategories: number;
+    archivedCategories: number;
+    activeSuppliers: number;
+    archivedSuppliers: number;
+  };
   growth: { revenueGrowthPct: number | null };
   customers: {
     newCustomers: number;
@@ -140,7 +186,32 @@ interface DashboardStats {
   };
   topProducts: TopProduct[];
   categorySales: CategorySale[];
-  charts: { granularity: "day" | "month"; series: SeriesPoint[] };
+  topSuppliers: SupplierSale[];
+  ordersByStatus: Record<string, number>;
+  highlights: {
+    highestRevenueProduct: TopProduct | null;
+    highestRevenueCategory: CategorySale | null;
+    fastestGrowingCategory: {
+      id: string;
+      name: string;
+      growthPct: number;
+    } | null;
+  };
+  productsNeverSold: {
+    count: number;
+    items: { id: string; name: string; createdAt: string }[];
+  };
+  topProductByWindow: {
+    today: WindowTop | null;
+    week: WindowTop | null;
+    month: WindowTop | null;
+    allTime: WindowTop | null;
+  };
+  charts: {
+    granularity: "day" | "month";
+    series: SeriesPoint[];
+    newCustomersSeries: NewCustomerPoint[];
+  };
   recentOrders: RecentOrder[];
   inventory: {
     totalProducts: number;
@@ -241,6 +312,11 @@ const DashboardSkeleton = () => (
         <div key={i} className="h-24 rounded-lg bg-muted" />
       ))}
     </div>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="h-16 rounded-lg bg-muted" />
+      ))}
+    </div>
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="h-20 rounded-lg bg-muted" />
@@ -271,14 +347,51 @@ const ErrorState = ({
   </div>
 );
 
+/** Small stat card used across the totals/quick-insight rows. */
+const MiniStat = ({
+  icon: Icon,
+  label,
+  value,
+  color,
+  bg,
+}: {
+  icon: typeof DollarSign;
+  label: string;
+  value: string;
+  color: string;
+  bg: string;
+}) => (
+  <Card className="border-0 shadow-sm">
+    <CardContent className="p-3.5 flex items-center gap-3">
+      <div
+        className={`h-9 w-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}
+      >
+        <Icon className={`h-4 w-4 ${color}`} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-lg font-bold font-display leading-tight truncate">
+          {value}
+        </p>
+        <p className="text-xs text-muted-foreground truncate">{label}</p>
+      </div>
+    </CardContent>
+  </Card>
+);
+
 /** Renders everything once stats have loaded successfully. */
 const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
   const {
     summary,
+    totals,
     growth,
     customers,
     topProducts,
     categorySales,
+    topSuppliers,
+    ordersByStatus,
+    highlights,
+    productsNeverSold,
+    topProductByWindow,
     charts,
     recentOrders,
     inventory,
@@ -351,9 +464,13 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
     },
   ];
 
+  const ordersByStatusData = Object.entries(ordersByStatus)
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => ({ status, count }));
+
   return (
     <div className="space-y-8">
-      {/* Main stat cards */}
+      {/* Main stat cards (period-scoped) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {mainStats.map(({ label, value, sub, icon: Icon, color, bg }) => (
           <Card key={label} className="border-0 shadow-sm">
@@ -391,6 +508,119 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* All-time business totals — always the same regardless of the selected period */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+          All-Time Totals
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <MiniStat
+            icon={DollarSign}
+            label="Total Revenue"
+            value={fmtCurrency(totals.revenueAllTime)}
+            color="text-green-600"
+            bg="bg-green-50 dark:bg-green-900/20"
+          />
+          <MiniStat
+            icon={ShoppingBag}
+            label="Total Orders"
+            value={String(totals.ordersAllTime)}
+            color="text-blue-600"
+            bg="bg-blue-50 dark:bg-blue-900/20"
+          />
+          <MiniStat
+            icon={Users}
+            label="Total Customers"
+            value={String(totals.totalCustomers)}
+            color="text-teal-600"
+            bg="bg-teal-50 dark:bg-teal-900/20"
+          />
+          <MiniStat
+            icon={Package}
+            label="Active Products"
+            value={String(totals.activeProducts)}
+            color="text-purple-600"
+            bg="bg-purple-50 dark:bg-purple-900/20"
+          />
+          <MiniStat
+            icon={Archive}
+            label="Archived Products"
+            value={String(totals.archivedProducts)}
+            color="text-slate-500"
+            bg="bg-slate-100 dark:bg-slate-800/40"
+          />
+          <MiniStat
+            icon={FolderTree}
+            label="Categories"
+            value={`${totals.activeCategories} active${totals.archivedCategories ? ` · ${totals.archivedCategories} archived` : ""}`}
+            color="text-orange-600"
+            bg="bg-orange-50 dark:bg-orange-900/20"
+          />
+          <MiniStat
+            icon={Truck}
+            label="Suppliers"
+            value={`${totals.activeSuppliers} active${totals.archivedSuppliers ? ` · ${totals.archivedSuppliers} archived` : ""}`}
+            color="text-cyan-600"
+            bg="bg-cyan-50 dark:bg-cyan-900/20"
+          />
+        </div>
+      </div>
+
+      {/* Quick insights */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+          Quick Insights
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <MiniStat
+            icon={Flame}
+            label="Best Seller"
+            value={topProducts[0]?.name ?? "—"}
+            color="text-orange-600"
+            bg="bg-orange-50 dark:bg-orange-900/20"
+          />
+          <MiniStat
+            icon={Star}
+            label="Top Revenue Product"
+            value={highlights.highestRevenueProduct?.name ?? "—"}
+            color="text-yellow-600"
+            bg="bg-yellow-50 dark:bg-yellow-900/20"
+          />
+          <MiniStat
+            icon={Rocket}
+            label="Fastest Growing Category"
+            value={
+              highlights.fastestGrowingCategory
+                ? `${highlights.fastestGrowingCategory.name} (+${highlights.fastestGrowingCategory.growthPct.toFixed(0)}%)`
+                : "N/A"
+            }
+            color="text-pink-600"
+            bg="bg-pink-50 dark:bg-pink-900/20"
+          />
+          <MiniStat
+            icon={AlertTriangle}
+            label="Low Stock Alerts"
+            value={String(inventory.lowStock.length)}
+            color="text-amber-600"
+            bg="bg-amber-50 dark:bg-amber-900/20"
+          />
+          <MiniStat
+            icon={Clock}
+            label="Pending Orders"
+            value={String(ordersByStatus.pending ?? 0)}
+            color="text-blue-600"
+            bg="bg-blue-50 dark:bg-blue-900/20"
+          />
+          <MiniStat
+            icon={XCircle}
+            label="Cancelled Orders"
+            value={String(ordersByStatus.cancelled ?? 0)}
+            color="text-red-600"
+            bg="bg-red-50 dark:bg-red-900/20"
+          />
+        </div>
       </div>
 
       {/* Highlights */}
@@ -464,10 +694,10 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
         </Card>
       </div>
 
-      {/* Highest / Lowest order */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <Card className="border-0 shadow-sm sm:col-span-1">
-          <CardContent className="p-4 flex items-center justify-between gap-4">
+      {/* Highest / Lowest order + Top product by window */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between gap-4 h-full">
             <div>
               <p className="text-xs text-muted-foreground">Highest Order</p>
               <p className="text-lg font-bold font-display">
@@ -481,6 +711,36 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
               <p className="text-lg font-bold font-display text-right">
                 {fmtCurrency(summary.lowestOrder)}
               </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm lg:col-span-2">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+              Top Seller — Today / Week / Month / All-Time
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {(
+                [
+                  ["Today", topProductByWindow.today],
+                  ["This Week", topProductByWindow.week],
+                  ["This Month", topProductByWindow.month],
+                  ["All Time", topProductByWindow.allTime],
+                ] as const
+              ).map(([label, w]) => (
+                <div key={label}>
+                  <p className="text-[11px] text-muted-foreground">{label}</p>
+                  <p className="text-sm font-medium line-clamp-1">
+                    {w?.name ?? "No sales"}
+                  </p>
+                  {w && (
+                    <p className="text-xs text-muted-foreground">
+                      {w.unitsSold} units
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -583,6 +843,95 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
+              <UserPlus className="h-4 w-4" /> New Customers Over Time
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {charts.newCustomersSeries.some((p) => p.newCustomers > 0) ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={charts.newCustomersSeries}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    opacity={0.3}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(d) => fmtAxisDate(d, charts.granularity)}
+                    tick={{ fontSize: 11 }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    width={30}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    labelFormatter={(d) =>
+                      fmtAxisDate(String(d), charts.granularity)
+                    }
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="newCustomers"
+                    stroke="hsl(190 80% 45%)"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground py-16 text-center">
+                No new customers in this period
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Package className="h-4 w-4" /> Orders by Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {ordersByStatusData.length ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie
+                    data={ordersByStatusData}
+                    dataKey="count"
+                    nameKey="status"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                  >
+                    {ordersByStatusData.map((d) => (
+                      <Cell
+                        key={d.status}
+                        fill={STATUS_COLORS[d.status] ?? "hsl(220 10% 60%)"}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value, name) => [`${value} orders`, name]}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: 11 }}
+                    formatter={(v) => <span className="capitalize">{v}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground py-16 text-center">
+                No orders for this period
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
               <Crown className="h-4 w-4" /> Top 5 Selling Products
             </CardTitle>
           </CardHeader>
@@ -669,8 +1018,83 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
         </Card>
       </div>
 
-      {/* Recent orders + stock alerts */}
+      {/* Top Suppliers + Products Never Sold */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Truck className="h-4 w-4" /> Top Suppliers
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {topSuppliers.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No supplier sales in this period
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {topSuppliers.map((s, i) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between py-1.5 border-b last:border-0"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs text-muted-foreground w-4">
+                        {i + 1}
+                      </span>
+                      <p className="text-sm font-medium truncate">{s.name}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-semibold">
+                        {fmtCurrency(s.revenue)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.unitsSold} units
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <PackageX className="h-4 w-4 text-slate-500" /> Products Never
+              Sold
+              <span className="ml-auto text-xs font-normal text-muted-foreground">
+                {productsNeverSold.count} total
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {productsNeverSold.items.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                Every active product has sold at least once 🎉
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {productsNeverSold.items.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between py-1.5 border-b last:border-0"
+                  >
+                    <p className="text-sm font-medium line-clamp-1">{p.name}</p>
+                    <p className="text-xs text-muted-foreground flex-shrink-0">
+                      Added {new Date(p.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent orders + stock alerts + recent activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -744,7 +1168,7 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
                         {p.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {p.category}
+                        {p.category} · {p.supplier ?? "No supplier"}
                       </p>
                     </div>
                     <Badge
@@ -765,12 +1189,12 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
                         {p.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {p.category}
+                        {p.category} · {p.supplier ?? "No supplier"}
                       </p>
                     </div>
                     <Badge
                       variant="outline"
-                      className="bg-orange-50 text-orange-700 border-orange-200 text-xs"
+                      className="bg-red-100 text-red-800 border-red-300 text-xs font-semibold"
                     >
                       {p.stock} left
                     </Badge>
@@ -780,6 +1204,8 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
             )}
           </CardContent>
         </Card>
+
+        <RecentActivity />
       </div>
     </div>
   );
