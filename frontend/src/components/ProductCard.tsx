@@ -76,11 +76,19 @@ const ProductCard = ({
           <span className="text-lg font-bold text-primary">
             ${safePrice.toFixed(2)}
           </span>
-          <span
-            className={`text-xs font-medium ${safeStock > 0 ? "text-green-600" : "text-destructive"}`}
-          >
-            {safeStock > 0 ? `${safeStock} in stock` : "Out of stock"}
-          </span>
+          {safeStock === 0 ? (
+            <span className="text-xs font-medium text-destructive">
+              Out of stock
+            </span>
+          ) : safeStock <= 5 ? (
+            <span className="text-xs font-medium text-amber-600">
+              Only {safeStock} left
+            </span>
+          ) : (
+            <span className="text-xs font-medium text-green-600">
+              {safeStock} in stock
+            </span>
+          )}
         </div>
 
         {/* Add to Cart */}
@@ -91,7 +99,7 @@ const ProductCard = ({
           onClick={() => addToCart.mutate({ productId: id })}
         >
           <ShoppingCart className="mr-2 h-4 w-4" />
-          Add to Cart
+          {safeStock <= 0 ? "Out of Stock" : "Add to Cart"}
         </Button>
       </CardContent>
     </Card>

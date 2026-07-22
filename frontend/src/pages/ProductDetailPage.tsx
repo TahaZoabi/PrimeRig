@@ -77,13 +77,19 @@ const ProductDetailPage = () => {
 
           {/* Stock + supplier row */}
           <div className="flex items-center gap-3 mb-6 flex-wrap">
-            <span
-              className={`text-sm font-medium ${
-                safeStock > 0 ? "text-green-600" : "text-destructive"
-              }`}
-            >
-              {safeStock > 0 ? `✓ ${safeStock} in stock` : "✕ Out of stock"}
-            </span>
+            {safeStock === 0 ? (
+              <span className="text-sm font-medium text-destructive">
+                Out of Stock
+              </span>
+            ) : safeStock <= 5 ? (
+              <span className="text-sm font-medium text-amber-600">
+                ⚠ Only {safeStock} left in stock
+              </span>
+            ) : (
+              <span className="text-sm font-medium text-green-600">
+                ✓ {safeStock} in stock
+              </span>
+            )}
             {product.suppliers?.name && (
               <span className="text-sm text-muted-foreground">
                 • Sold by {product.suppliers.name}
@@ -143,18 +149,37 @@ const ProductDetailPage = () => {
                 variant="ghost"
                 size="icon"
                 className="h-10 w-10"
-                onClick={() => setQty(Math.max(1, qty - 1))}
+                disabled={safeStock <= 0}
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
               >
                 <Minus className="h-4 w-4" />
               </Button>
-              <span className="px-4 font-medium min-w-[2rem] text-center">
-                {qty}
-              </span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={safeStock}
+                step={1}
+                value={qty}
+                disabled={safeStock <= 0}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setQty(1);
+                    return;
+                  }
+                  const parsed = Math.trunc(Number(raw));
+                  if (Number.isNaN(parsed)) return;
+                  setQty(Math.min(Math.max(1, parsed), Math.max(safeStock, 1)));
+                }}
+                className="w-14 px-1 py-2 text-center font-medium bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-10 w-10"
-                onClick={() => setQty(Math.min(safeStock, qty + 1))}
+                disabled={safeStock <= 0}
+                onClick={() => setQty((q) => Math.min(safeStock, q + 1))}
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -167,7 +192,8 @@ const ProductDetailPage = () => {
                 addToCart.mutate({ productId: product.id, quantity: qty })
               }
             >
-              <ShoppingCart className="mr-2 h-5 w-5" /> Add to Cart
+              <ShoppingCart className="mr-2 h-5 w-5" />
+              {safeStock <= 0 ? "Out of Stock" : "Add to Cart"}
             </Button>
           </div>
         </div>

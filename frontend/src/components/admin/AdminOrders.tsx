@@ -37,13 +37,16 @@ const PERIOD_OPTIONS: PeriodOption[] = [
   { value: "custom", label: "Custom Range" },
 ];
 
-const ORDER_STATUSES = [
-  "pending",
-  "processing",
-  "shipped",
-  "delivered",
-  "cancelled",
-] as const;
+// Mirrors the backend's ALLOWED_TRANSITIONS — the backend is the source of
+// truth and re-validates regardless, but showing only valid next statuses
+// here means the admin can't even attempt an invalid skip in the first place.
+const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  pending: ["processing", "cancelled"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
 
 const statusStyle: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -117,8 +120,10 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
       queryClient.invalidateQueries({ queryKey: ["admin-orders"] });
       toast.success("Order status updated");
     },
-    onError: () => {
-      toast.error("Failed to update order status");
+    onError: (err: { response?: { data?: { error?: string } } }) => {
+      toast.error(
+        err?.response?.data?.error ?? "Failed to update order status",
+      );
     },
   });
 
@@ -191,7 +196,10 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ORDER_STATUSES.map((s) => (
+                        {[
+                          order.status,
+                          ...(ALLOWED_TRANSITIONS[order.status] ?? []),
+                        ].map((s) => (
                           <SelectItem key={s} value={s} className="capitalize">
                             {s}
                           </SelectItem>

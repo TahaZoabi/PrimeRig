@@ -19,8 +19,12 @@ const CartPage = () => {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <ShoppingBag className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
-        <h2 className="font-display text-2xl font-bold mb-2">Sign in to view your cart</h2>
-        <p className="text-muted-foreground mb-6">Your cart is saved when you're logged in.</p>
+        <h2 className="font-display text-2xl font-bold mb-2">
+          Sign in to view your cart
+        </h2>
+        <p className="text-muted-foreground mb-6">
+          Your cart is saved when you're logged in.
+        </p>
         <Button asChild>
           <Link to="/auth">Sign In</Link>
         </Button>
@@ -35,8 +39,12 @@ const CartPage = () => {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <ShoppingBag className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
-        <h2 className="font-display text-2xl font-bold mb-2">Your cart is empty</h2>
-        <p className="text-muted-foreground mb-6">Browse our products and add something!</p>
+        <h2 className="font-display text-2xl font-bold mb-2">
+          Your cart is empty
+        </h2>
+        <p className="text-muted-foreground mb-6">
+          Browse our products and add something!
+        </p>
         <Button asChild>
           <Link to="/products">Shop Now</Link>
         </Button>
@@ -54,79 +62,98 @@ const CartPage = () => {
           {cart.map((item) => {
             const itemPrice = parseFloat(String(item.products.price)) || 0;
             return (
-            <Card key={item.id}>
-              <CardContent className="flex items-center gap-4 p-4">
-                {/* Product image */}
-                <Link to={`/products/${item.product_id}`} className="flex-shrink-0">
-                  <div className="h-20 w-20 rounded-md bg-muted overflow-hidden">
-                    {item.products.image_url ? (
-                      <img
-                        src={item.products.image_url}
-                        alt={item.products.name}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        No img
-                      </div>
-                    )}
-                  </div>
-                </Link>
-
-                {/* Name + price */}
-                <div className="flex-1 min-w-0">
+              <Card key={item.id}>
+                <CardContent className="flex items-center gap-4 p-4">
+                  {/* Product image */}
                   <Link
                     to={`/products/${item.product_id}`}
-                    className="font-semibold hover:text-primary transition-colors line-clamp-1"
+                    className="flex-shrink-0"
                   >
-                    {item.products.name}
+                    <div className="h-20 w-20 rounded-md bg-muted overflow-hidden">
+                      {item.products.image_url ? (
+                        <img
+                          src={item.products.image_url}
+                          alt={item.products.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                          No img
+                        </div>
+                      )}
+                    </div>
                   </Link>
-                  <p className="text-primary font-bold mt-1">
-                    ${itemPrice.toFixed(2)}
+
+                  {/* Name + price */}
+                  <div className="flex-1 min-w-0">
+                    <Link
+                      to={`/products/${item.product_id}`}
+                      className="font-semibold hover:text-primary transition-colors line-clamp-1"
+                    >
+                      {item.products.name}
+                    </Link>
+                    <p className="text-primary font-bold mt-1">
+                      ${itemPrice.toFixed(2)}
+                    </p>
+                    {item.quantity >= item.products.stock && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Max available in stock
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Quantity controls */}
+                  <div className="flex items-center border rounded-md flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() =>
+                        updateQuantity.mutate({
+                          itemId: item.id,
+                          quantity: item.quantity - 1,
+                        })
+                      }
+                    >
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <span className="px-3 text-sm font-medium">
+                      {item.quantity}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      disabled={item.quantity >= item.products.stock}
+                      onClick={() =>
+                        updateQuantity.mutate({
+                          itemId: item.id,
+                          quantity: item.quantity + 1,
+                        })
+                      }
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+
+                  {/* Line total */}
+                  <p className="font-bold w-20 text-right flex-shrink-0">
+                    ${(itemPrice * item.quantity).toFixed(2)}
                   </p>
-                </div>
 
-                {/* Quantity controls */}
-                <div className="flex items-center border rounded-md flex-shrink-0">
+                  {/* Remove button */}
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="flex-shrink-0"
                     onClick={() =>
-                      updateQuantity.mutate({ itemId: item.id, quantity: item.quantity - 1 })
+                      updateQuantity.mutate({ itemId: item.id, quantity: 0 })
                     }
                   >
-                    <Minus className="h-3 w-3" />
+                    <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
-                  <span className="px-3 text-sm font-medium">{item.quantity}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() =>
-                      updateQuantity.mutate({ itemId: item.id, quantity: item.quantity + 1 })
-                    }
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
-
-                {/* Line total */}
-                <p className="font-bold w-20 text-right flex-shrink-0">
-                  ${(itemPrice * item.quantity).toFixed(2)}
-                </p>
-
-                {/* Remove button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="flex-shrink-0"
-                  onClick={() => updateQuantity.mutate({ itemId: item.id, quantity: 0 })}
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
             );
           })}
 
@@ -143,7 +170,9 @@ const CartPage = () => {
         {/* ── Order summary ── */}
         <Card className="h-fit">
           <CardContent className="p-6">
-            <h2 className="font-display text-xl font-bold mb-4">Order Summary</h2>
+            <h2 className="font-display text-xl font-bold mb-4">
+              Order Summary
+            </h2>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
