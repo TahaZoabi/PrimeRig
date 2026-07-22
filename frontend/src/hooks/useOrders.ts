@@ -56,7 +56,10 @@ export const useCreateOrder = () => {
       shippingAddress: string;
       paymentMethod: string;
     }) => {
-      const { data } = await ordersApi.create({ shippingAddress, paymentMethod });
+      const { data } = await ordersApi.create({
+        shippingAddress,
+        paymentMethod,
+      });
       return data;
     },
     onSuccess: () => {
@@ -65,8 +68,10 @@ export const useCreateOrder = () => {
       queryClient.invalidateQueries({ queryKey: ["cart"] });
       toast.success("Order placed successfully!");
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "Failed to place order");
+    onError: (err: Error & { response?: { data?: { error?: string } } }) => {
+      toast.error(
+        err.response?.data?.error ?? err.message ?? "Failed to place order",
+      );
     },
   });
 };

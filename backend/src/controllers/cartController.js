@@ -21,7 +21,7 @@ const getCart = async (req, res, next) => {
        FROM cart_items ci
        JOIN products p ON p.id = ci.product_id
        WHERE ci.user_id = ?`,
-      [req.user.id]
+      [req.user.id],
     );
 
     // Shape to match frontend CartItemWithProduct interface
@@ -51,32 +51,58 @@ const getCart = async (req, res, next) => {
 const addToCart = async (req, res, next) => {
   try {
     const { productId, quantity = 1 } = req.body;
-    if (!productId) return res.status(400).json({ error: "productId is required" });
+    if (!productId)
+      return res.status(400).json({ error: "productId is required" });
+
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return res
+        .status(400)
+        .json({ error: "Quantity must be a positive whole number" });
+    }
 
     // Check product exists and has enough stock
     const [products] = await pool.query(
-      "SELECT id, stock FROM products WHERE id = ? AND is_active = 1",
-      [productId]
+      "SELECT id, name, stock FROM products WHERE id = ? AND is_active = 1",
+      [productId],
     );
-    if (!products.length) return res.status(404).json({ error: "Product not found" });
+    if (!products.length)
+      return res.status(404).json({ error: "Product not found" });
+    const product = products[0];
 
     // Check for existing cart item
     const [existing] = await pool.query(
       "SELECT id, quantity FROM cart_items WHERE user_id = ? AND product_id = ?",
-      [req.user.id, productId]
+      [req.user.id, productId],
     );
+
+    const currentQtyInCart = existing.length ? existing[0].quantity : 0;
+    const requestedTotal = currentQtyInCart + qty;
+
+    if (requestedTotal > product.stock) {
+      return res.status(409).json({
+        error:
+          product.stock === 0
+            ? `${product.name} is out of stock`
+            : `Only ${product.stock} of "${product.name}" available${
+                currentQtyInCart > 0
+                  ? ` (you already have ${currentQtyInCart} in your cart)`
+                  : ""
+              }`,
+      });
+    }
 
     if (existing.length) {
       // Update quantity
       await pool.query(
         "UPDATE cart_items SET quantity = quantity + ? WHERE id = ?",
-        [quantity, existing[0].id]
+        [qty, existing[0].id],
       );
     } else {
       // Insert new item
       await pool.query(
         "INSERT INTO cart_items (id, user_id, product_id, quantity) VALUES (?, ?, ?, ?)",
-        [uuidv4(), req.user.id, productId, quantity]
+        [uuidv4(), req.user.id, productId, qty],
       );
     }
 
@@ -95,18 +121,36 @@ const updateCartItem = async (req, res, next) => {
   try {
     const { quantity } = req.body;
     const { itemId } = req.params;
+    const qty = Number(quantity);
 
-    if (Number(quantity) <= 0) {
-      await pool.query(
-        "DELETE FROM cart_items WHERE id = ? AND user_id = ?",
-        [itemId, req.user.id]
-      );
+    if (qty <= 0) {
+      await pool.query("DELETE FROM cart_items WHERE id = ? AND user_id = ?", [
+        itemId,
+        req.user.id,
+      ]);
       return res.json({ message: "Item removed" });
+    }
+
+    // Never trust the frontend's cap — re-check the product's real stock.
+    const [rows] = await pool.query(
+      `SELECT ci.id, p.stock, p.name
+       FROM cart_items ci
+       JOIN products p ON p.id = ci.product_id
+       WHERE ci.id = ? AND ci.user_id = ?`,
+      [itemId, req.user.id],
+    );
+    if (!rows.length)
+      return res.status(404).json({ error: "Cart item not found" });
+
+    if (qty > rows[0].stock) {
+      return res.status(409).json({
+        error: `Only ${rows[0].stock} of "${rows[0].name}" available`,
+      });
     }
 
     await pool.query(
       "UPDATE cart_items SET quantity = ? WHERE id = ? AND user_id = ?",
-      [quantity, itemId, req.user.id]
+      [qty, itemId, req.user.id],
     );
     res.json({ message: "Quantity updated" });
   } catch (err) {

@@ -39,7 +39,13 @@ export const useCart = () => {
 
   // Add item (or increment quantity if exists)
   const addToCart = useMutation({
-    mutationFn: async ({ productId, quantity = 1 }: { productId: string; quantity?: number }) => {
+    mutationFn: async ({
+      productId,
+      quantity = 1,
+    }: {
+      productId: string;
+      quantity?: number;
+    }) => {
       if (!user) throw new Error("Please sign in to add items to cart");
       await cartApi.add(productId, quantity);
     },
@@ -47,21 +53,31 @@ export const useCart = () => {
       queryClient.invalidateQueries({ queryKey: ["cart"] });
       toast.success("Added to cart!");
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "Could not add to cart");
+    onError: (err: Error & { response?: { data?: { error?: string } } }) => {
+      toast.error(
+        err.response?.data?.error ?? err.message ?? "Could not add to cart",
+      );
     },
   });
 
   // Update quantity (quantity=0 removes the item)
   const updateQuantity = useMutation({
-    mutationFn: async ({ itemId, quantity }: { itemId: string; quantity: number }) => {
+    mutationFn: async ({
+      itemId,
+      quantity,
+    }: {
+      itemId: string;
+      quantity: number;
+    }) => {
       await cartApi.update(itemId, quantity);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cart"] });
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "Could not update cart");
+    onError: (err: Error & { response?: { data?: { error?: string } } }) => {
+      toast.error(
+        err.response?.data?.error ?? err.message ?? "Could not update cart",
+      );
     },
   });
 
@@ -75,15 +91,18 @@ export const useCart = () => {
     },
   });
 
-  const cartTotal = cartQuery.data?.reduce(
-    (sum, item) => sum + (parseFloat(String(item.products.price)) || 0) * item.quantity,
-    0
-  ) ?? 0;
+  const cartTotal =
+    cartQuery.data?.reduce(
+      (sum, item) =>
+        sum + (parseFloat(String(item.products.price)) || 0) * item.quantity,
+      0,
+    ) ?? 0;
 
-  const cartCount = cartQuery.data?.reduce(
-    (sum, item) => sum + (parseInt(String(item.quantity), 10) || 0),
-    0
-  ) ?? 0;
+  const cartCount =
+    cartQuery.data?.reduce(
+      (sum, item) => sum + (parseInt(String(item.quantity), 10) || 0),
+      0,
+    ) ?? 0;
 
   return {
     cart: cartQuery.data ?? [],

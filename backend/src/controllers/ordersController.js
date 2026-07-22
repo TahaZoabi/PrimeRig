@@ -67,7 +67,19 @@ const getMyOrders = async (req, res, next) => {
 /**
  * POST /api/orders
  * Body: { shippingAddress, paymentMethod }
- * Creates order from current cart, then clears cart
+ * Creates order from current cart, then clears cart.
+ *
+ * This checkout has no separate async payment step (payment is simulated
+ * and always "succeeds" synchronously) — so order creation itself IS the
+ * successful-payment event, and the order is created as "processing"
+ * directly rather than "pending". "pending" remains a valid state in the
+ * status machine below for any future flow that needs it (e.g. a payment
+ * method that isn't instantly confirmed).
+ *
+ * Stock is re-validated here against the live database (never the
+ * frontend's cached cart) and decremented atomically with the order, all
+ * inside one transaction with the product rows locked (FOR UPDATE) so two
+ * concurrent checkouts can't both "pass" a check for the same last unit.
  */
 const createOrder = async (req, res, next) => {
   const conn = await pool.getConnection();
@@ -76,12 +88,14 @@ const createOrder = async (req, res, next) => {
 
     const { shippingAddress, paymentMethod = "credit_card" } = req.body;
 
-    // Get cart items
+    // Get cart items, locking the referenced product rows for the duration
+    // of this transaction.
     const [cartItems] = await conn.query(
-      `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name
+      `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name, p.is_active
        FROM cart_items ci
        JOIN products p ON p.id = ci.product_id
-       WHERE ci.user_id = ?`,
+       WHERE ci.user_id = ?
+       FOR UPDATE`,
       [req.user.id],
     );
 
@@ -90,17 +104,38 @@ const createOrder = async (req, res, next) => {
       return res.status(400).json({ error: "Cart is empty" });
     }
 
+    // Re-validate every item against real, current stock — the frontend's
+    // cart view may be stale (another order, or an admin edit, since it was
+    // last fetched). Collect every problem so the customer sees the whole
+    // picture in one pass instead of fixing items one at a time.
+    const problems = [];
+    for (const item of cartItems) {
+      if (!item.is_active) {
+        problems.push(`"${item.name}" is no longer available`);
+      } else if (item.quantity > item.stock) {
+        problems.push(
+          item.stock === 0
+            ? `"${item.name}" is out of stock`
+            : `Only ${item.stock} of "${item.name}" left in stock (you have ${item.quantity} in your cart)`,
+        );
+      }
+    }
+    if (problems.length) {
+      await conn.rollback();
+      return res.status(409).json({ error: problems.join("; ") });
+    }
+
     // Calculate total
     const total = cartItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
     );
 
-    // Create order
+    // Create order — starts at "processing" (see note above)
     const orderId = uuidv4();
     await conn.query(
-      `INSERT INTO orders (id, user_id, total, shipping_address, payment_method)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (id, user_id, total, shipping_address, payment_method, status)
+       VALUES (?, ?, ?, ?, ?, 'processing')`,
       [orderId, req.user.id, total, shippingAddress || null, paymentMethod],
     );
 
@@ -117,6 +152,14 @@ const createOrder = async (req, res, next) => {
       "INSERT INTO order_items (id, order_id, product_id, quantity, price) VALUES ?",
       [itemValues],
     );
+
+    // Decrement stock for every purchased item now that the order is confirmed
+    for (const item of cartItems) {
+      await conn.query("UPDATE products SET stock = stock - ? WHERE id = ?", [
+        item.quantity,
+        item.product_id,
+      ]);
+    }
 
     // Clear cart
     await conn.query("DELETE FROM cart_items WHERE user_id = ?", [req.user.id]);
@@ -215,6 +258,29 @@ const getAllOrders = async (req, res, next) => {
   }
 };
 
+const ORDER_STATUSES = [
+  "pending",
+  "processing",
+  "shipped",
+  "delivered",
+  "cancelled",
+];
+
+/**
+ * Valid manual admin transitions. Orders are created as "processing"
+ * directly (see createOrder), so "pending" is reachable in principle but
+ * not produced by the current checkout flow. Cancellation is only allowed
+ * before an order has shipped — once it's physically on its way, marking it
+ * "cancelled" would no longer reflect reality.
+ */
+const ALLOWED_TRANSITIONS = {
+  pending: ["processing", "cancelled"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
+
 /**
  * PUT /api/admin/orders/:id/status  (admin)
  * Body: { status }
@@ -222,16 +288,26 @@ const getAllOrders = async (req, res, next) => {
 const updateOrderStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
-    const validStatuses = [
-      "pending",
-      "processing",
-      "shipped",
-      "delivered",
-      "cancelled",
-    ];
-    if (!validStatuses.includes(status)) {
+    if (!ORDER_STATUSES.includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
+
+    const [[order]] = await pool.query(
+      "SELECT status FROM orders WHERE id = ?",
+      [req.params.id],
+    );
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    const currentStatus = order.status;
+    if (currentStatus === status) {
+      return res.status(400).json({ error: `Order is already ${status}` });
+    }
+    if (!ALLOWED_TRANSITIONS[currentStatus]?.includes(status)) {
+      return res.status(400).json({
+        error: `Cannot change order status from "${currentStatus}" to "${status}"`,
+      });
+    }
+
     await pool.query("UPDATE orders SET status = ? WHERE id = ?", [
       status,
       req.params.id,
