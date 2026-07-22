@@ -13,6 +13,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
+const { logActivity } = require("../utils/activityLog");
 
 /** GET /api/categories  (public — active only) */
 const getCategories = async (req, res, next) => {
@@ -72,6 +73,7 @@ const createCategory = async (req, res, next) => {
     const [rows] = await pool.query("SELECT * FROM categories WHERE id = ?", [
       id,
     ]);
+    logActivity("category", `Category "${name.trim()}" was added`);
     res.status(201).json(rows[0]);
   } catch (err) {
     next(err);
@@ -107,10 +109,15 @@ const updateCategory = async (req, res, next) => {
  */
 const deleteCategory = async (req, res, next) => {
   try {
+    const [[cat]] = await pool.query(
+      "SELECT name FROM categories WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE categories SET is_active = 0, archived_at = NOW() WHERE id = ?",
       [req.params.id],
     );
+    if (cat) logActivity("category", `Category "${cat.name}" was archived`);
     res.json({ message: "Category archived" });
   } catch (err) {
     next(err);
@@ -120,10 +127,15 @@ const deleteCategory = async (req, res, next) => {
 /** PUT /api/admin/categories/:id/restore  (admin) — bring back an archived category */
 const restoreCategory = async (req, res, next) => {
   try {
+    const [[cat]] = await pool.query(
+      "SELECT name FROM categories WHERE id = ?",
+      [req.params.id],
+    );
     await pool.query(
       "UPDATE categories SET is_active = 1, archived_at = NULL WHERE id = ?",
       [req.params.id],
     );
+    if (cat) logActivity("category", `Category "${cat.name}" was restored`);
     res.json({ message: "Category restored" });
   } catch (err) {
     next(err);

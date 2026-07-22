@@ -8,6 +8,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
+const { logActivity } = require("../utils/activityLog");
 const {
   PERIODS,
   resolveRange,
@@ -122,6 +123,11 @@ const createOrder = async (req, res, next) => {
 
     await conn.commit();
 
+    logActivity(
+      "order",
+      `Customer ${req.user.full_name || req.user.email} placed order #${orderId.slice(0, 8).toUpperCase()} ($${total.toFixed(2)})`,
+    );
+
     // Return the new order
     const [orders] = await pool.query("SELECT * FROM orders WHERE id = ?", [
       orderId,
@@ -230,6 +236,15 @@ const updateOrderStatus = async (req, res, next) => {
       status,
       req.params.id,
     ]);
+
+    const shortId = req.params.id.slice(0, 8).toUpperCase();
+    logActivity(
+      "order",
+      status === "cancelled"
+        ? `Order #${shortId} was cancelled`
+        : `Order #${shortId} status changed to ${status}`,
+    );
+
     res.json({ message: "Order status updated" });
   } catch (err) {
     next(err);

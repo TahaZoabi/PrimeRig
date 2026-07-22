@@ -112,3 +112,8 @@ export const adminStatsApi = {
   get: (params: { period: string; startDate?: string; endDate?: string }) =>
     api.get("/admin/stats", { params }),
 };
+
+// Recent activity feed
+export const activityApi = {
+  get: (limit = 20) => api.get("/admin/activity", { params: { limit } }),
+};
