@@ -63,6 +63,13 @@ interface AdminProduct {
   form_factor: string | null;
 }
 
+interface DuplicateInfo {
+  productId: string;
+  existingName: string;
+  currentStock: number;
+  enteredStock: number;
+}
+
 const emptyForm: ProductForm = {
   name: "",
   description: "",
@@ -82,6 +89,9 @@ const AdminProducts = () => {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(
+    null,
+  );
 
   // ── Data fetching ──────────────────────────────────────────
   const { data: products, isLoading } = useQuery<AdminProduct[]>({
@@ -115,34 +125,64 @@ const AdminProducts = () => {
 
   // ── Save (create or update) ────────────────────────────────
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts: { confirmStockIncreaseFor?: string } = {}) => {
       const payload = {
         name: form.name,
         description: form.description || null,
         price: Number(form.price),
         stock: Number(form.stock),
         image_url: form.image_url || null,
-        category_id: form.category_id || null,
-        supplier_id: form.supplier_id || null,
+        category_id: form.category_id,
+        supplier_id: form.supplier_id,
         socket_type: form.socket_type || null,
         ddr_type: form.ddr_type || null,
         wattage: form.wattage ? Number(form.wattage) : 0,
         form_factor: form.form_factor || null,
+        ...(opts.confirmStockIncreaseFor
+          ? { confirmStockIncreaseFor: opts.confirmStockIncreaseFor }
+          : {}),
       };
       if (editId) {
         await productsApi.update(editId, payload);
-      } else {
-        await productsApi.create(payload);
+        return null;
       }
+      const { data } = await productsApi.create(payload);
+      return data as { merged?: boolean; message?: string } | null;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin-products"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
-      toast.success(editId ? "Product updated" : "Product created");
+      if (data?.merged) {
+        toast.success(data.message ?? "Existing product stock increased.");
+      } else {
+        toast.success(
+          editId ? "Product updated" : "Product created successfully.",
+        );
+      }
+      setDuplicateInfo(null);
       closeDialog();
     },
-    onError: (err: { response?: { data?: { error?: string } } }) => {
-      toast.error(err?.response?.data?.error ?? "Failed to save product");
+    onError: (err: {
+      response?: {
+        data?: {
+          error?: string;
+          duplicate?: { id: string; name: string; stock: number };
+        };
+      };
+    }) => {
+      const data = err?.response?.data;
+      // Creating a new product that collides with an active one — offer to
+      // increase its stock instead of just rejecting.
+      if (!editId && data?.duplicate) {
+        setDuplicateInfo({
+          productId: data.duplicate.id,
+          existingName: data.duplicate.name,
+          currentStock: data.duplicate.stock,
+          enteredStock: Number(form.stock) || 0,
+        });
+        return;
+      }
+      toast.error(data?.error ?? "Failed to save product");
     },
   });
 
@@ -183,6 +223,7 @@ const AdminProducts = () => {
     setOpen(false);
     setEditId(null);
     setForm(emptyForm);
+    setDuplicateInfo(null);
   };
 
   const openEdit = (p: AdminProduct) => {
@@ -315,7 +356,15 @@ const AdminProducts = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                saveMutation.mutate();
+                if (!form.category_id) {
+                  toast.error("Please select a category");
+                  return;
+                }
+                if (!form.supplier_id) {
+                  toast.error("Please select a supplier");
+                  return;
+                }
+                saveMutation.mutate({});
               }}
               className="space-y-3"
             >
@@ -359,16 +408,15 @@ const AdminProducts = () => {
 
               {/* Category */}
               <Select
-                value={form.category_id || "none"}
+                value={form.category_id}
                 onValueChange={(v) =>
-                  setForm((f) => ({ ...f, category_id: v === "none" ? "" : v }))
+                  setForm((f) => ({ ...f, category_id: v }))
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder="Category *" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Category</SelectItem>
                   {categories?.map(
                     (c: { id: string; name: string; is_active?: boolean }) => (
                       <SelectItem key={c.id} value={c.id}>
@@ -382,16 +430,15 @@ const AdminProducts = () => {
 
               {/* Supplier */}
               <Select
-                value={form.supplier_id || "none"}
+                value={form.supplier_id}
                 onValueChange={(v) =>
-                  setForm((f) => ({ ...f, supplier_id: v === "none" ? "" : v }))
+                  setForm((f) => ({ ...f, supplier_id: v }))
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Supplier" />
+                  <SelectValue placeholder="Supplier *" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Supplier</SelectItem>
                   {suppliers?.map(
                     (s: { id: string; name: string; is_active?: boolean }) => (
                       <SelectItem key={s.id} value={s.id}>
@@ -443,6 +490,62 @@ const AdminProducts = () => {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Duplicate-product confirmation: offer to add to existing stock instead of creating a new row */}
+      <Dialog
+        open={!!duplicateInfo}
+        onOpenChange={(o) => {
+          if (!o) setDuplicateInfo(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>This product already exists</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            A product named "{duplicateInfo?.existingName}" already exists in
+            this category. Would you like to increase its stock instead?
+          </p>
+          {duplicateInfo && (
+            <div className="text-sm bg-muted rounded-md p-3 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Current stock:</span>
+                <span className="font-medium">
+                  {duplicateInfo.currentStock}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Entered stock:</span>
+                <span className="font-medium">
+                  {duplicateInfo.enteredStock}
+                </span>
+              </div>
+              <div className="flex justify-between border-t pt-1 font-semibold">
+                <span>Final stock:</span>
+                <span>
+                  {duplicateInfo.currentStock + duplicateInfo.enteredStock}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDuplicateInfo(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={saveMutation.isPending}
+              onClick={() =>
+                duplicateInfo &&
+                saveMutation.mutate({
+                  confirmStockIncreaseFor: duplicateInfo.productId,
+                })
+              }
+            >
+              Increase Stock
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Tabs defaultValue="active">
         <TabsList className="mb-4">

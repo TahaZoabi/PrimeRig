@@ -11,30 +11,30 @@ const pool = require("../db");
 const { logActivity } = require("../utils/activityLog");
 
 /**
- * Is there already a product with this name for this supplier, ignoring
- * case and leading/trailing whitespace? Two products can share a name if
- * they come from different suppliers (or one has no supplier). excludeId
- * lets an update check for duplicates among *other* rows only.
+ * Normalize a product name for duplicate comparison: trims leading/trailing
+ * whitespace, collapses repeated internal spaces to one, and lowercases.
+ * "RTX 4070", "rtx 4070", "  RTX   4070  " all normalize identically.
  */
-const findDuplicateProduct = async (name, supplierId, excludeId) => {
-  const params = [name];
-  let supplierClause;
-  if (supplierId) {
-    supplierClause = "supplier_id = ?";
-    params.push(supplierId);
-  } else {
-    supplierClause = "supplier_id IS NULL";
-  }
-  if (excludeId) params.push(excludeId);
+const normalizeProductName = (s) =>
+  String(s).trim().replace(/\s+/g, " ").toLowerCase();
 
+/**
+ * Find an existing product with the same name in the same category
+ * (case/whitespace-insensitive). This is the catalog's "same product"
+ * identity: a supplier is where you source restocks from, not part of what
+ * makes a catalog entry distinct — two supplier records for the same named
+ * item in the same category is a restock scenario, not two products.
+ * excludeId lets an update check for duplicates among *other* rows only.
+ * Returns the matching row (including archived ones) or null.
+ */
+const findDuplicateProduct = async (name, categoryId, excludeId) => {
   const [rows] = await pool.query(
-    `SELECT id FROM products
-     WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
-       AND ${supplierClause}
-       ${excludeId ? "AND id != ?" : ""}`,
-    params,
+    `SELECT id, name, stock, is_active FROM products
+     WHERE category_id = ? ${excludeId ? "AND id != ?" : ""}`,
+    excludeId ? [categoryId, excludeId] : [categoryId],
   );
-  return rows.length > 0;
+  const target = normalizeProductName(name);
+  return rows.find((p) => normalizeProductName(p.name) === target) || null;
 };
 
 /**
@@ -141,6 +141,10 @@ const getProduct = async (req, res, next) => {
 
 /**
  * POST /api/products  (admin)
+ * Body may include confirmStockIncreaseFor: <productId> — set only when the
+ * admin has already been shown the "this product exists, increase stock
+ * instead?" prompt and confirmed it. In that case this adds `stock` to the
+ * existing product instead of creating a new row.
  */
 const createProduct = async (req, res, next) => {
   try {
@@ -157,13 +161,88 @@ const createProduct = async (req, res, next) => {
       ddr_type,
       wattage,
       form_factor,
+      confirmStockIncreaseFor,
     } = req.body;
 
-    if (!name) return res.status(400).json({ error: "Name is required" });
+    // ---- Required fields ----
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "Product name is required" });
+    }
+    if (!category_id) {
+      return res.status(400).json({ error: "Category is required" });
+    }
+    if (!supplier_id) {
+      return res.status(400).json({ error: "Supplier is required" });
+    }
 
-    if (await findDuplicateProduct(name, supplier_id || null)) {
+    // ---- Referenced IDs must actually exist ----
+    const [[category]] = await pool.query(
+      "SELECT id FROM categories WHERE id = ?",
+      [category_id],
+    );
+    if (!category) {
+      return res
+        .status(400)
+        .json({ error: "Selected category does not exist" });
+    }
+    const [[supplier]] = await pool.query(
+      "SELECT id FROM suppliers WHERE id = ?",
+      [supplier_id],
+    );
+    if (!supplier) {
+      return res
+        .status(400)
+        .json({ error: "Selected supplier does not exist" });
+    }
+
+    // ---- Admin already confirmed "increase stock instead" for a specific product ----
+    if (confirmStockIncreaseFor) {
+      const [[existing]] = await pool.query(
+        "SELECT id, name, stock FROM products WHERE id = ?",
+        [confirmStockIncreaseFor],
+      );
+      if (!existing) {
+        return res.status(404).json({
+          error: "The product you're trying to restock no longer exists",
+        });
+      }
+      const addQty = Number(stock) || 0;
+      const previousStock = existing.stock;
+      const newStock = previousStock + addQty;
+
+      await pool.query("UPDATE products SET stock = ? WHERE id = ?", [
+        newStock,
+        existing.id,
+      ]);
+      logActivity(
+        "product",
+        `Stock for "${existing.name}" increased from ${previousStock} to ${newStock}`,
+      );
+
+      return res.json({
+        merged: true,
+        message: `Existing product stock increased from ${previousStock} to ${newStock}.`,
+        productId: existing.id,
+        previousStock,
+        newStock,
+      });
+    }
+
+    // ---- Duplicate detection: same name + same category ----
+    const duplicate = await findDuplicateProduct(name, category_id);
+    if (duplicate) {
+      if (!duplicate.is_active) {
+        return res.status(409).json({
+          error: `A product named "${duplicate.name}" already exists in this category but is archived. Restore it from the Archived tab instead of creating a new one.`,
+        });
+      }
       return res.status(409).json({
-        error: `A product named "${name.trim()}" already exists for this supplier`,
+        error: `A product named "${duplicate.name}" already exists in this category.`,
+        duplicate: {
+          id: duplicate.id,
+          name: duplicate.name,
+          stock: duplicate.stock,
+        },
       });
     }
 
@@ -175,13 +254,13 @@ const createProduct = async (req, res, next) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
-        name,
+        name.trim(),
         description || null,
         Number(price) || 0,
         Number(stock) || 0,
         image_url || null,
-        category_id || null,
-        supplier_id || null,
+        category_id,
+        supplier_id,
         specs ? JSON.stringify(specs) : null,
         socket_type || null,
         ddr_type || null,
@@ -226,11 +305,43 @@ const updateProduct = async (req, res, next) => {
       is_active,
     } = req.body;
 
-    if (!name) return res.status(400).json({ error: "Name is required" });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "Product name is required" });
+    }
+    if (!category_id) {
+      return res.status(400).json({ error: "Category is required" });
+    }
+    if (!supplier_id) {
+      return res.status(400).json({ error: "Supplier is required" });
+    }
 
-    if (await findDuplicateProduct(name, supplier_id || null, req.params.id)) {
+    const [[category]] = await pool.query(
+      "SELECT id FROM categories WHERE id = ?",
+      [category_id],
+    );
+    if (!category) {
+      return res
+        .status(400)
+        .json({ error: "Selected category does not exist" });
+    }
+    const [[supplier]] = await pool.query(
+      "SELECT id FROM suppliers WHERE id = ?",
+      [supplier_id],
+    );
+    if (!supplier) {
+      return res
+        .status(400)
+        .json({ error: "Selected supplier does not exist" });
+    }
+
+    const duplicate = await findDuplicateProduct(
+      name,
+      category_id,
+      req.params.id,
+    );
+    if (duplicate) {
       return res.status(409).json({
-        error: `Another product named "${name.trim()}" already exists for this supplier`,
+        error: `Another product named "${duplicate.name}" already exists in this category`,
       });
     }
 
@@ -251,13 +362,13 @@ const updateProduct = async (req, res, next) => {
          is_active   = COALESCE(?, is_active)
        WHERE id = ?`,
       [
-        name,
+        name.trim(),
         description || null,
         Number(price) || 0,
         Number(stock) || 0,
         image_url || null,
-        category_id || null,
-        supplier_id || null,
+        category_id,
+        supplier_id,
         specs ? JSON.stringify(specs) : null,
         socket_type || null,
         ddr_type || null,
