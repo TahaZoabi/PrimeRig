@@ -17,6 +17,7 @@ const cart = require("../controllers/cartController");
 const orders = require("../controllers/ordersController");
 const adminStats = require("../controllers/adminStatsController");
 const activity = require("../controllers/activityController");
+const payments = require("../controllers/paymentsController");
 
 // ============================================================
 // AUTH ROUTES
@@ -143,13 +144,30 @@ router.delete("/cart", authenticate, cart.clearCart);
 // ORDER ROUTES
 // ============================================================
 router.get("/orders", authenticate, orders.getMyOrders);
-router.post("/orders", authenticate, orders.createOrder);
 router.get("/admin/orders", authenticate, requireAdmin, orders.getAllOrders);
 router.put(
   "/admin/orders/:id/status",
   authenticate,
   requireAdmin,
   orders.updateOrderStatus,
+);
+
+// ============================================================
+// PAYPAL PAYMENTS
+// ============================================================
+// Replaces the old direct "POST /orders" simulated-checkout endpoint. An
+// order is now only ever created after the backend verifies a real PayPal
+// capture (see paymentsController.js) — there is no longer a way to create
+// an order without going through PayPal.
+router.post(
+  "/payments/paypal/create-order",
+  authenticate,
+  payments.createPaypalOrder,
+);
+router.post(
+  "/payments/paypal/capture-order",
+  authenticate,
+  payments.capturePaypalOrder,
 );
 
 // ============================================================

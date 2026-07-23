@@ -6,7 +6,6 @@
  * Admins can view and update all orders.
  */
 
-const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
 const { logActivity } = require("../utils/activityLog");
 const {
@@ -61,127 +60,6 @@ const getMyOrders = async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
-  }
-};
-
-/**
- * POST /api/orders
- * Body: { shippingAddress, paymentMethod }
- * Creates order from current cart, then clears cart.
- *
- * This checkout has no separate async payment step (payment is simulated
- * and always "succeeds" synchronously) — so order creation itself IS the
- * successful-payment event, and the order is created as "processing"
- * directly rather than "pending". "pending" remains a valid state in the
- * status machine below for any future flow that needs it (e.g. a payment
- * method that isn't instantly confirmed).
- *
- * Stock is re-validated here against the live database (never the
- * frontend's cached cart) and decremented atomically with the order, all
- * inside one transaction with the product rows locked (FOR UPDATE) so two
- * concurrent checkouts can't both "pass" a check for the same last unit.
- */
-const createOrder = async (req, res, next) => {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-
-    const { shippingAddress, paymentMethod = "credit_card" } = req.body;
-
-    // Get cart items, locking the referenced product rows for the duration
-    // of this transaction.
-    const [cartItems] = await conn.query(
-      `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name, p.is_active
-       FROM cart_items ci
-       JOIN products p ON p.id = ci.product_id
-       WHERE ci.user_id = ?
-       FOR UPDATE`,
-      [req.user.id],
-    );
-
-    if (!cartItems.length) {
-      await conn.rollback();
-      return res.status(400).json({ error: "Cart is empty" });
-    }
-
-    // Re-validate every item against real, current stock — the frontend's
-    // cart view may be stale (another order, or an admin edit, since it was
-    // last fetched). Collect every problem so the customer sees the whole
-    // picture in one pass instead of fixing items one at a time.
-    const problems = [];
-    for (const item of cartItems) {
-      if (!item.is_active) {
-        problems.push(`"${item.name}" is no longer available`);
-      } else if (item.quantity > item.stock) {
-        problems.push(
-          item.stock === 0
-            ? `"${item.name}" is out of stock`
-            : `Only ${item.stock} of "${item.name}" left in stock (you have ${item.quantity} in your cart)`,
-        );
-      }
-    }
-    if (problems.length) {
-      await conn.rollback();
-      return res.status(409).json({ error: problems.join("; ") });
-    }
-
-    // Calculate total
-    const total = cartItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0,
-    );
-
-    // Create order — starts at "processing" (see note above)
-    const orderId = uuidv4();
-    await conn.query(
-      `INSERT INTO orders (id, user_id, total, shipping_address, payment_method, status)
-       VALUES (?, ?, ?, ?, ?, 'processing')`,
-      [orderId, req.user.id, total, shippingAddress || null, paymentMethod],
-    );
-
-    // Create order items
-    const itemValues = cartItems.map((item) => [
-      uuidv4(),
-      orderId,
-      item.product_id,
-      item.quantity,
-      item.price,
-    ]);
-
-    await conn.query(
-      "INSERT INTO order_items (id, order_id, product_id, quantity, price) VALUES ?",
-      [itemValues],
-    );
-
-    // Decrement stock for every purchased item now that the order is confirmed
-    for (const item of cartItems) {
-      await conn.query("UPDATE products SET stock = stock - ? WHERE id = ?", [
-        item.quantity,
-        item.product_id,
-      ]);
-    }
-
-    // Clear cart
-    await conn.query("DELETE FROM cart_items WHERE user_id = ?", [req.user.id]);
-
-    await conn.commit();
-
-    logActivity(
-      "order",
-      `Customer ${req.user.full_name || req.user.email} placed order #${orderId.slice(0, 8).toUpperCase()} ($${total.toFixed(2)})`,
-    );
-
-    // Return the new order
-    const [orders] = await pool.query("SELECT * FROM orders WHERE id = ?", [
-      orderId,
-    ]);
-    const order = orders[0];
-    res.status(201).json({ ...order, total: parseFloat(order.total) });
-  } catch (err) {
-    await conn.rollback();
-    next(err);
-  } finally {
-    conn.release();
   }
 };
 
@@ -327,4 +205,4 @@ const updateOrderStatus = async (req, res, next) => {
   }
 };
 
-module.exports = { getMyOrders, createOrder, getAllOrders, updateOrderStatus };
+module.exports = { getMyOrders, getAllOrders, updateOrderStatus };

@@ -1,14 +1,14 @@
 /**
  * hooks/useOrders.ts
  *
- * Order fetching and creation hooks.
- * Replaces Supabase order operations with REST API calls.
+ * Order fetching hooks. Order *creation* now happens exclusively through
+ * the PayPal payment flow — see hooks/usePayments.ts — since the backend
+ * only ever creates an order after verifying a real PayPal capture.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ordersApi } from "@/lib/api";
 import { useAuth } from "./useAuth";
-import { toast } from "sonner";
 
 export interface OrderItem {
   id: string;
@@ -26,6 +26,10 @@ export interface Order {
   total: number;
   shipping_address: string | null;
   payment_method: string | null;
+  payment_status: string;
+  paypal_order_id: string | null;
+  paypal_capture_id: string | null;
+  paid_at: string | null;
   created_at: string;
   updated_at: string;
   order_items: OrderItem[];
@@ -40,38 +44,6 @@ export const useOrders = () => {
     queryFn: async () => {
       const { data } = await ordersApi.myOrders();
       return data;
-    },
-  });
-};
-
-/** Mutation to place a new order from the current cart */
-export const useCreateOrder = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({
-      shippingAddress,
-      paymentMethod,
-    }: {
-      shippingAddress: string;
-      paymentMethod: string;
-    }) => {
-      const { data } = await ordersApi.create({
-        shippingAddress,
-        paymentMethod,
-      });
-      return data;
-    },
-    onSuccess: () => {
-      // Invalidate both orders and cart caches
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
-      toast.success("Order placed successfully!");
-    },
-    onError: (err: Error & { response?: { data?: { error?: string } } }) => {
-      toast.error(
-        err.response?.data?.error ?? err.message ?? "Failed to place order",
-      );
     },
   });
 };

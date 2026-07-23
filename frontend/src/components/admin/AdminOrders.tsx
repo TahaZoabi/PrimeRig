@@ -63,6 +63,8 @@ interface AdminOrder {
   total: number;
   shipping_address: string | null;
   payment_method: string | null;
+  payment_status: string;
+  paypal_capture_id: string | null;
   created_at: string;
   order_items: Array<{
     id: string;
@@ -242,7 +244,24 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
                   {/* Meta */}
                   <div className="text-xs text-muted-foreground space-y-0.5 border-t pt-2">
                     {order.payment_method && (
-                      <p>Payment: {order.payment_method.replace(/_/g, " ")}</p>
+                      <p>
+                        Payment: {order.payment_method.replace(/_/g, " ")}
+                        {" · "}
+                        <span
+                          className={
+                            order.payment_status === "paid"
+                              ? "text-green-600 font-medium"
+                              : "text-amber-600 font-medium"
+                          }
+                        >
+                          {order.payment_status}
+                        </span>
+                      </p>
+                    )}
+                    {order.paypal_capture_id && (
+                      <p className="font-mono">
+                        PayPal Transaction: {order.paypal_capture_id}
+                      </p>
                     )}
                     {order.shipping_address && (
                       <p>Ship to: {order.shipping_address}</p>

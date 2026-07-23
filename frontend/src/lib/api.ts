@@ -96,8 +96,6 @@ export const cartApi = {
 // Orders
 export const ordersApi = {
   myOrders: () => api.get("/orders"),
-  create: (data: { shippingAddress: string; paymentMethod: string }) =>
-    api.post("/orders", data),
   adminList: (params?: {
     period?: string;
     startDate?: string;
@@ -105,6 +103,14 @@ export const ordersApi = {
   }) => api.get("/admin/orders", { params }),
   updateStatus: (id: string, status: string) =>
     api.put(`/admin/orders/${id}/status`, { status }),
+};
+
+// PayPal payments — the only way an order is created now. The backend
+// verifies the payment with PayPal itself before an order ever exists.
+export const paymentsApi = {
+  createPaypalOrder: () => api.post("/payments/paypal/create-order", {}),
+  capturePaypalOrder: (data: { orderID: string; shippingAddress: string }) =>
+    api.post("/payments/paypal/capture-order", data),
 };
 
 // Admin dashboard stats
