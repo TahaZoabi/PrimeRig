@@ -8,6 +8,7 @@
 
 const pool = require("../db");
 const { logActivity } = require("../utils/activityLog");
+const { v4: uuidv4 } = require("uuid");
 const {
   PERIODS,
   resolveRange,
@@ -65,9 +66,9 @@ const getMyOrders = async (req, res, next) => {
 
 /**
  * GET /api/admin/orders  (admin)
- * Returns orders with items, optionally filtered by the same period/date-range
- * scheme used by GET /api/admin/stats. No period param = all orders (unchanged
- * default behavior for any other caller).
+ * Returns orders with items and basic customer info, optionally filtered by
+ * the same period/date-range scheme used by GET /api/admin/stats. No period
+ * param = all orders (unchanged default behavior for any other caller).
  */
 const getAllOrders = async (req, res, next) => {
   try {
@@ -93,12 +94,18 @@ const getAllOrders = async (req, res, next) => {
     }
 
     const rangeSql = start
-      ? "created_at >= ? AND created_at <= ?"
-      : "created_at <= ?";
+      ? "o.created_at >= ? AND o.created_at <= ?"
+      : "o.created_at <= ?";
     const rangeParams = start ? [start, end] : [end];
 
     const [orders] = await pool.query(
-      `SELECT * FROM orders WHERE ${rangeSql} ORDER BY created_at DESC`,
+      `SELECT o.*, u.full_name AS customer_name, u.email AS customer_email,
+              p.phone AS customer_phone
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.user_id
+       LEFT JOIN profiles p ON p.user_id = o.user_id
+       WHERE ${rangeSql}
+       ORDER BY o.created_at DESC`,
       rangeParams,
     );
 
@@ -106,7 +113,7 @@ const getAllOrders = async (req, res, next) => {
 
     const orderIds = orders.map((o) => o.id);
     const [items] = await pool.query(
-      `SELECT oi.*, p.name AS product_name
+      `SELECT oi.*, p.name AS product_name, p.image_url AS product_image
        FROM order_items oi
        JOIN products p ON p.id = oi.product_id
        WHERE oi.order_id IN (?)`,
@@ -120,7 +127,7 @@ const getAllOrders = async (req, res, next) => {
         id: item.id,
         quantity: item.quantity,
         price: parseFloat(item.price),
-        products: { name: item.product_name },
+        products: { name: item.product_name, image_url: item.product_image },
       });
     });
 
@@ -136,6 +143,56 @@ const getAllOrders = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/orders/:id  (admin)
+ * Full detail for a single order — customer info, items, and the status
+ * timeline — used by the Order Details modal. Kept separate from the list
+ * endpoint above so listing orders doesn't pay the cost of fetching full
+ * timeline history for every row.
+ */
+const getOrderDetails = async (req, res, next) => {
+  try {
+    const [[order]] = await pool.query(
+      `SELECT o.*, u.full_name AS customer_name, u.email AS customer_email,
+              p.phone AS customer_phone
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.user_id
+       LEFT JOIN profiles p ON p.user_id = o.user_id
+       WHERE o.id = ?`,
+      [req.params.id],
+    );
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    const [items] = await pool.query(
+      `SELECT oi.*, p.name AS product_name, p.image_url AS product_image
+       FROM order_items oi
+       JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = ?`,
+      [order.id],
+    );
+
+    const [history] = await pool.query(
+      `SELECT status, created_at FROM order_status_history
+       WHERE order_id = ? ORDER BY created_at ASC`,
+      [order.id],
+    );
+
+    res.json({
+      ...order,
+      total: parseFloat(order.total),
+      order_items: items.map((item) => ({
+        id: item.id,
+        quantity: item.quantity,
+        price: parseFloat(item.price),
+        products: { name: item.product_name, image_url: item.product_image },
+      })),
+      status_history: history,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const ORDER_STATUSES = [
   "pending",
   "processing",
@@ -146,10 +203,10 @@ const ORDER_STATUSES = [
 
 /**
  * Valid manual admin transitions. Orders are created as "processing"
- * directly (see createOrder), so "pending" is reachable in principle but
- * not produced by the current checkout flow. Cancellation is only allowed
- * before an order has shipped — once it's physically on its way, marking it
- * "cancelled" would no longer reflect reality.
+ * directly (see orderFulfillment.js), so "pending" is reachable in
+ * principle but not produced by the current checkout flow. Cancellation is
+ * only allowed before an order has shipped — once it's physically on its
+ * way, marking it "cancelled" would no longer reflect reality.
  */
 const ALLOWED_TRANSITIONS = {
   pending: ["processing", "cancelled"],
@@ -190,6 +247,10 @@ const updateOrderStatus = async (req, res, next) => {
       status,
       req.params.id,
     ]);
+    await pool.query(
+      "INSERT INTO order_status_history (id, order_id, status) VALUES (?, ?, ?)",
+      [uuidv4(), req.params.id, status],
+    );
 
     const shortId = req.params.id.slice(0, 8).toUpperCase();
     logActivity(
@@ -205,4 +266,9 @@ const updateOrderStatus = async (req, res, next) => {
   }
 };
 
-module.exports = { getMyOrders, getAllOrders, updateOrderStatus };
+module.exports = {
+  getMyOrders,
+  getAllOrders,
+  getOrderDetails,
+  updateOrderStatus,
+};

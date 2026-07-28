@@ -5,9 +5,16 @@
  * PayPal capture flow (paymentsController.js) can reuse the exact same
  * stock-validation and order-creation transaction that the old direct
  * checkout endpoint used — no duplicated business logic between the two.
+ *
+ * Also owns the auto-reorder check: whenever an order decrements a
+ * product's stock, if the resulting stock is at or below that product's
+ * configured minimum and Auto Reorder is enabled, an internal Purchase
+ * Order is created automatically (never a real purchase from the
+ * supplier — this only creates a record for a human to act on).
  */
 
 const { v4: uuidv4 } = require("uuid");
+const { logActivity } = require("./activityLog");
 
 /** A validation failure that should be surfaced as a specific HTTP status. */
 class ValidationError extends Error {
@@ -30,7 +37,9 @@ class ValidationError extends Error {
  */
 async function lockAndValidateCart(conn, userId) {
   const [cartItems] = await conn.query(
-    `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name, p.is_active
+    `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name, p.is_active,
+            p.auto_reorder, p.min_stock, p.reorder_quantity,
+            p.preferred_supplier_id, p.supplier_id
      FROM cart_items ci
      JOIN products p ON p.id = ci.product_id
      WHERE ci.user_id = ?
@@ -66,9 +75,42 @@ async function lockAndValidateCart(conn, userId) {
 }
 
 /**
- * Insert the order + order_items, decrement stock for every purchased item,
- * and clear the cart. Must run inside the same transaction that locked the
- * cart via lockAndValidateCart. Returns the new order's id.
+ * After decrementing a product's stock, create an internal Purchase Order
+ * if it's now at/below its minimum and Auto Reorder is enabled — but never
+ * if a Pending purchase order already exists for that product. This never
+ * contacts a real supplier; it only records that a human should reorder.
+ */
+async function maybeCreatePurchaseOrder(conn, item, newStock) {
+  if (!item.auto_reorder || newStock > item.min_stock) return;
+
+  const [[existingPending]] = await conn.query(
+    `SELECT id FROM purchase_orders WHERE product_id = ? AND status = 'pending'`,
+    [item.product_id],
+  );
+  if (existingPending) return;
+
+  const supplierId = item.preferred_supplier_id || item.supplier_id;
+  if (!supplierId) return; // nothing sensible to order from
+
+  const quantity = item.reorder_quantity > 0 ? item.reorder_quantity : 1;
+  const poId = uuidv4();
+  await conn.query(
+    `INSERT INTO purchase_orders (id, product_id, supplier_id, quantity, status)
+     VALUES (?, ?, ?, ?, 'pending')`,
+    [poId, item.product_id, supplierId, quantity],
+  );
+
+  logActivity(
+    "purchase_order",
+    `Auto Reorder: purchase order created for "${item.name}" (qty ${quantity}) — stock at ${newStock}`,
+  );
+}
+
+/**
+ * Insert the order + order_items, decrement stock for every purchased item
+ * (triggering auto-reorder checks as needed), record the initial status
+ * history entry, and clear the cart. Must run inside the same transaction
+ * that locked the cart via lockAndValidateCart. Returns the new order's id.
  *
  * paymentInfo: {
  *   paymentMethod: string,               e.g. "paypal"
@@ -116,9 +158,22 @@ async function finalizeOrder(conn, userId, cartItems, total, paymentInfo) {
       item.quantity,
       item.product_id,
     ]);
+    const [[{ stock: newStock }]] = await conn.query(
+      "SELECT stock FROM products WHERE id = ?",
+      [item.product_id],
+    );
+    await maybeCreatePurchaseOrder(conn, item, newStock);
   }
 
   await conn.query("DELETE FROM cart_items WHERE user_id = ?", [userId]);
+
+  // Record the order's initial status for the Order Timeline. "Paid" is
+  // read directly from orders.paid_at (already set above when applicable),
+  // not stored in this history table.
+  await conn.query(
+    "INSERT INTO order_status_history (id, order_id, status) VALUES (?, ?, 'processing')",
+    [uuidv4(), orderId],
+  );
 
   return orderId;
 }
