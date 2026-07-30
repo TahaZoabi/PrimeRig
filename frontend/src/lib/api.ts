@@ -101,8 +101,18 @@ export const ordersApi = {
     startDate?: string;
     endDate?: string;
   }) => api.get("/admin/orders", { params }),
+  getDetails: (id: string) => api.get(`/admin/orders/${id}`),
   updateStatus: (id: string, status: string) =>
     api.put(`/admin/orders/${id}/status`, { status }),
+};
+
+// Purchase orders — internal inventory-replenishment records only, never a
+// real purchase from a supplier.
+export const purchaseOrdersApi = {
+  list: (status?: string) =>
+    api.get("/admin/purchase-orders", { params: status ? { status } : {} }),
+  updateStatus: (id: string, status: string) =>
+    api.put(`/admin/purchase-orders/${id}/status`, { status }),
 };
 
 // PayPal payments — the only way an order is created now. The backend

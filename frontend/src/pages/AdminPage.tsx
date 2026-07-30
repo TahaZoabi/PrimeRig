@@ -12,6 +12,7 @@ import AdminProducts from "@/components/admin/AdminProducts";
 import AdminCategories from "@/components/admin/AdminCategories";
 import AdminSuppliers from "@/components/admin/AdminSuppliers";
 import AdminOrders from "@/components/admin/AdminOrders";
+import AdminInventory from "@/components/admin/AdminInventory";
 import type { Period } from "@/components/admin/PeriodFilter";
 import {
   LayoutDashboard,
@@ -19,6 +20,7 @@ import {
   FolderTree,
   Truck,
   ShoppingBag,
+  Boxes,
 } from "lucide-react";
 
 export interface PeriodFilterState {
@@ -74,6 +76,9 @@ const AdminPage = () => {
           <TabsTrigger value="orders" className="flex items-center gap-2">
             <ShoppingBag className="h-4 w-4" /> Orders
           </TabsTrigger>
+          <TabsTrigger value="inventory" className="flex items-center gap-2">
+            <Boxes className="h-4 w-4" /> Inventory
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard">
@@ -93,6 +98,9 @@ const AdminPage = () => {
         </TabsContent>
         <TabsContent value="orders">
           <AdminOrders filter={ordersFilter} onFilterChange={setOrdersFilter} />
+        </TabsContent>
+        <TabsContent value="inventory">
+          <AdminInventory />
         </TabsContent>
       </Tabs>
     </div>
