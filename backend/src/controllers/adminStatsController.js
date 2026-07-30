@@ -279,6 +279,19 @@ const getDashboardStats = async (req, res, next) => {
        ORDER BY p.stock ASC
        LIMIT 15`,
     );
+    // ---- Inventory Alerts widget (current state — not period-scoped) ----
+    const [[{ outOfStockCount }]] = await pool.query(
+      `SELECT COUNT(*) AS outOfStockCount FROM products WHERE is_active = 1 AND stock = 0`,
+    );
+    const [[{ lowStockCount }]] = await pool.query(
+      `SELECT COUNT(*) AS lowStockCount FROM products WHERE is_active = 1 AND stock > 0 AND stock <= 5`,
+    );
+    const [[{ autoReordersTriggered }]] = await pool.query(
+      `SELECT COUNT(*) AS autoReordersTriggered FROM purchase_orders`,
+    );
+    const [[{ pendingPurchaseOrders }]] = await pool.query(
+      `SELECT COUNT(*) AS pendingPurchaseOrders FROM purchase_orders WHERE status = 'pending'`,
+    );
 
     // ---- All-time totals (never period-scoped — these describe the whole business) ----
     const [[allTimeOrders]] = await pool.query(
@@ -506,6 +519,12 @@ const getDashboardStats = async (req, res, next) => {
             category: p.category_name,
             supplier: p.supplier_name,
           })),
+        inventoryAlerts: {
+          outOfStock: Number(outOfStockCount),
+          lowStock: Number(lowStockCount),
+          autoReordersTriggered: Number(autoReordersTriggered),
+          pendingPurchaseOrders: Number(pendingPurchaseOrders),
+        },
       },
     });
   } catch (err) {

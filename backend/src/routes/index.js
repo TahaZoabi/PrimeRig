@@ -18,6 +18,7 @@ const orders = require("../controllers/ordersController");
 const adminStats = require("../controllers/adminStatsController");
 const activity = require("../controllers/activityController");
 const payments = require("../controllers/paymentsController");
+const purchaseOrders = require("../controllers/purchaseOrdersController");
 
 // ============================================================
 // AUTH ROUTES
@@ -145,11 +146,33 @@ router.delete("/cart", authenticate, cart.clearCart);
 // ============================================================
 router.get("/orders", authenticate, orders.getMyOrders);
 router.get("/admin/orders", authenticate, requireAdmin, orders.getAllOrders);
+router.get(
+  "/admin/orders/:id",
+  authenticate,
+  requireAdmin,
+  orders.getOrderDetails,
+);
 router.put(
   "/admin/orders/:id/status",
   authenticate,
   requireAdmin,
   orders.updateOrderStatus,
+);
+
+// ============================================================
+// PURCHASE ORDERS (inventory replenishment)
+// ============================================================
+router.get(
+  "/admin/purchase-orders",
+  authenticate,
+  requireAdmin,
+  purchaseOrders.getPurchaseOrders,
+);
+router.put(
+  "/admin/purchase-orders/:id/status",
+  authenticate,
+  requireAdmin,
+  purchaseOrders.updatePurchaseOrderStatus,
 );
 
 // ============================================================

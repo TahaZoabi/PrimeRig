@@ -1,12 +1,14 @@
 /**
  * components/admin/AdminOrders.tsx
  * View orders (filterable by the same date-range periods as the Overview
- * dashboard) and update their status via dropdown.
+ * dashboard), click any order to open a full-detail modal, and update
+ * status via dropdown.
  *
  * Filter state is owned by AdminPage (see PeriodFilterState) so it survives
  * switching tabs, and is passed down here as controlled props — independent
  * from the Overview tab's own filter.
  */
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ordersApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +24,7 @@ import {
 import PeriodFilter, {
   type PeriodOption,
 } from "@/components/admin/PeriodFilter";
+import OrderDetailsModal from "@/components/admin/OrderDetailsModal";
 import type { PeriodFilterState } from "@/pages/AdminPage";
 import { AlertTriangle, RefreshCw, PackageOpen } from "lucide-react";
 import { toast } from "sonner";
@@ -85,6 +88,7 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
   const canQuery = period !== "custom" || customReady;
 
   const queryClient = useQueryClient();
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   const {
     data: orders,
@@ -169,7 +173,11 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
 
           <div className="space-y-4">
             {orders?.map((order) => (
-              <Card key={order.id}>
+              <Card
+                key={order.id}
+                className="cursor-pointer hover:border-primary/40 transition-colors"
+                onClick={() => setSelectedOrderId(order.id)}
+              >
                 <CardHeader className="flex flex-row items-start justify-between pb-2">
                   <div>
                     <CardTitle className="text-base">
@@ -186,7 +194,10 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-3 flex-shrink-0">
+                  <div
+                    className="flex items-center gap-3 flex-shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {/* Status updater */}
                     <Select
                       value={order.status}
@@ -276,6 +287,14 @@ const AdminOrders = ({ filter, onFilterChange }: AdminOrdersProps) => {
           </div>
         </>
       )}
+
+      <OrderDetailsModal
+        orderId={selectedOrderId}
+        open={!!selectedOrderId}
+        onOpenChange={(o) => {
+          if (!o) setSelectedOrderId(null);
+        }}
+      />
     </div>
   );
 };
