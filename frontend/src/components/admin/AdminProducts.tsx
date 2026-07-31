@@ -28,7 +28,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import LoadingSpinner from "@/components/LoadingSpinner";
-import { Plus, Pencil, Archive, RotateCcw } from "lucide-react";
+import OrderFromSupplierDialog from "@/components/admin/OrderFromSupplierDialog";
+import { Plus, Pencil, Archive, RotateCcw, Truck } from "lucide-react";
 import { toast } from "sonner";
 
 interface ProductForm {
@@ -43,6 +44,10 @@ interface ProductForm {
   ddr_type: string;
   wattage: string;
   form_factor: string;
+  auto_reorder: boolean;
+  min_stock: string;
+  target_stock_level: string;
+  preferred_supplier_id: string;
 }
 
 interface AdminProduct {
@@ -61,6 +66,10 @@ interface AdminProduct {
   ddr_type: string | null;
   wattage: number | null;
   form_factor: string | null;
+  auto_reorder: boolean;
+  min_stock: number;
+  target_stock_level: number;
+  preferred_supplier_id: string | null;
 }
 
 interface DuplicateInfo {
@@ -82,6 +91,10 @@ const emptyForm: ProductForm = {
   ddr_type: "",
   wattage: "",
   form_factor: "",
+  auto_reorder: false,
+  min_stock: "",
+  target_stock_level: "",
+  preferred_supplier_id: "",
 };
 
 const AdminProducts = () => {
@@ -92,6 +105,8 @@ const AdminProducts = () => {
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(
     null,
   );
+  const [orderFromSupplierProduct, setOrderFromSupplierProduct] =
+    useState<AdminProduct | null>(null);
 
   // ── Data fetching ──────────────────────────────────────────
   const { data: products, isLoading } = useQuery<AdminProduct[]>({
@@ -138,6 +153,12 @@ const AdminProducts = () => {
         ddr_type: form.ddr_type || null,
         wattage: form.wattage ? Number(form.wattage) : 0,
         form_factor: form.form_factor || null,
+        auto_reorder: form.auto_reorder,
+        min_stock: form.min_stock ? Number(form.min_stock) : 0,
+        target_stock_level: form.target_stock_level
+          ? Number(form.target_stock_level)
+          : 0,
+        preferred_supplier_id: form.preferred_supplier_id || null,
         ...(opts.confirmStockIncreaseFor
           ? { confirmStockIncreaseFor: opts.confirmStockIncreaseFor }
           : {}),
@@ -240,6 +261,10 @@ const AdminProducts = () => {
       ddr_type: p.ddr_type ?? "",
       wattage: p.wattage ? String(p.wattage) : "",
       form_factor: p.form_factor ?? "",
+      auto_reorder: p.auto_reorder,
+      min_stock: p.min_stock ? String(p.min_stock) : "",
+      target_stock_level: p.target_stock_level ? String(p.target_stock_level) : "",
+      preferred_supplier_id: p.preferred_supplier_id ?? "",
     });
     setOpen(true);
   };
@@ -285,6 +310,16 @@ const AdminProducts = () => {
         {!archived && (
           <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
             <Pencil className="h-4 w-4" />
+          </Button>
+        )}
+        {!archived && (
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Order From Supplier"
+            onClick={() => setOrderFromSupplierProduct(p)}
+          >
+            <Truck className="h-4 w-4 text-blue-600" />
           </Button>
         )}
         {archived ? (
@@ -479,6 +514,70 @@ const AdminProducts = () => {
                 />
               </div>
 
+              {/* Inventory replenishment */}
+              <p className="text-xs font-semibold text-muted-foreground pt-2">
+                Inventory Replenishment
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.auto_reorder}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, auto_reorder: e.target.checked }))
+                  }
+                  className="h-4 w-4 rounded border-input accent-primary"
+                />
+                Auto Restock when stock runs low
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  type="number"
+                  placeholder="Low Stock Threshold"
+                  value={form.min_stock}
+                  onChange={set("min_stock")}
+                  min="0"
+                />
+                <Input
+                  type="number"
+                  placeholder="Target Stock Level"
+                  value={form.target_stock_level}
+                  onChange={set("target_stock_level")}
+                  min="0"
+                />
+              </div>
+              <Select
+                value={form.preferred_supplier_id || "none"}
+                onValueChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    preferred_supplier_id: v === "none" ? "" : v,
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Preferred Supplier (for restocks)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Same as Supplier above</SelectItem>
+                  {suppliers?.map(
+                    (s: { id: string; name: string; is_active?: boolean }) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                        {s.is_active === false ? " (Archived)" : ""}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+              {form.auto_reorder && (
+                <p className="text-xs text-muted-foreground">
+                  When stock reaches {form.min_stock || "0"} or below, a
+                  Purchase Order topping stock back up to {form.target_stock_level || "0"}{" "}
+                  units will be created automatically — this never places a
+                  real order with the supplier, it just flags it for you to action.
+                </p>
+              )}
+
               <Button
                 type="submit"
                 className="w-full"
@@ -581,6 +680,14 @@ const AdminProducts = () => {
           )}
         </TabsContent>
       </Tabs>
+
+      <OrderFromSupplierDialog
+        product={orderFromSupplierProduct}
+        suppliers={suppliers}
+        onOpenChange={(o) => {
+          if (!o) setOrderFromSupplierProduct(null);
+        }}
+      />
     </div>
   );
 };

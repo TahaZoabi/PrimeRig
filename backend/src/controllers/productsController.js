@@ -162,6 +162,10 @@ const createProduct = async (req, res, next) => {
       wattage,
       form_factor,
       confirmStockIncreaseFor,
+      auto_reorder,
+      min_stock,
+      target_stock_level,
+      preferred_supplier_id,
     } = req.body;
 
     // ---- Required fields ----
@@ -214,6 +218,12 @@ const createProduct = async (req, res, next) => {
         newStock,
         existing.id,
       ]);
+      await pool.query(
+        `INSERT INTO restock_history
+           (id, product_id, purchase_order_id, quantity, previous_stock, new_stock, source)
+         VALUES (?, ?, NULL, ?, ?, ?, 'manual')`,
+        [uuidv4(), existing.id, addQty, previousStock, newStock],
+      );
       logActivity(
         "product",
         `Stock for "${existing.name}" increased from ${previousStock} to ${newStock}`,
@@ -250,8 +260,9 @@ const createProduct = async (req, res, next) => {
     await pool.query(
       `INSERT INTO products
          (id, name, description, price, stock, image_url, category_id, supplier_id,
-          specs, socket_type, ddr_type, wattage, form_factor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          specs, socket_type, ddr_type, wattage, form_factor,
+          auto_reorder, min_stock, target_stock_level, preferred_supplier_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         name.trim(),
@@ -266,6 +277,10 @@ const createProduct = async (req, res, next) => {
         ddr_type || null,
         Number(wattage) || 0,
         form_factor || null,
+        auto_reorder ? 1 : 0,
+        Number(min_stock) || 0,
+        Number(target_stock_level) || 0,
+        preferred_supplier_id || null,
       ],
     );
 
@@ -303,6 +318,10 @@ const updateProduct = async (req, res, next) => {
       wattage,
       form_factor,
       is_active,
+      auto_reorder,
+      min_stock,
+      target_stock_level,
+      preferred_supplier_id,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -345,6 +364,13 @@ const updateProduct = async (req, res, next) => {
       });
     }
 
+    const [[before]] = await pool.query(
+      "SELECT stock FROM products WHERE id = ?",
+      [req.params.id],
+    );
+    const previousStock = before ? before.stock : null;
+    const newStock = Number(stock) || 0;
+
     await pool.query(
       `UPDATE products SET
          name        = ?,
@@ -359,13 +385,17 @@ const updateProduct = async (req, res, next) => {
          ddr_type    = ?,
          wattage     = ?,
          form_factor = ?,
-         is_active   = COALESCE(?, is_active)
+         is_active   = COALESCE(?, is_active),
+         auto_reorder = ?,
+         min_stock = ?,
+         target_stock_level = ?,
+         preferred_supplier_id = ?
        WHERE id = ?`,
       [
         name.trim(),
         description || null,
         Number(price) || 0,
-        Number(stock) || 0,
+        newStock,
         image_url || null,
         category_id,
         supplier_id,
@@ -375,9 +405,32 @@ const updateProduct = async (req, res, next) => {
         Number(wattage) || 0,
         form_factor || null,
         is_active !== undefined ? (is_active ? 1 : 0) : null,
+        auto_reorder ? 1 : 0,
+        Number(min_stock) || 0,
+        Number(target_stock_level) || 0,
+        preferred_supplier_id || null,
         req.params.id,
       ],
     );
+
+    // A direct increase to the stock number here is a manual restock — log
+    // it the same way a received Purchase Order or the duplicate-merge flow
+    // would, so Restock History reflects every way stock actually goes up.
+    if (previousStock !== null && newStock > previousStock) {
+      await pool.query(
+        `INSERT INTO restock_history
+           (id, product_id, purchase_order_id, quantity, previous_stock, new_stock, source)
+         VALUES (?, ?, NULL, ?, ?, ?, 'manual')`,
+        [
+          uuidv4(),
+          req.params.id,
+          newStock - previousStock,
+          previousStock,
+          newStock,
+        ],
+      );
+    }
+
     logActivity("product", `Product "${name.trim()}" was updated`);
     res.json({ message: "Product updated" });
   } catch (err) {
@@ -467,6 +520,9 @@ function shapeProduct(row) {
     stock: parseInt(rest.stock, 10) || 0,
     wattage: parseInt(rest.wattage, 10) || 0,
     is_active: Boolean(rest.is_active),
+    auto_reorder: Boolean(rest.auto_reorder),
+    min_stock: parseInt(rest.min_stock, 10) || 0,
+    target_stock_level: parseInt(rest.target_stock_level, 10) || 0,
     specs,
     categories: category_name ? { name: category_name } : null,
     suppliers: supplier_name ? { name: supplier_name } : null,

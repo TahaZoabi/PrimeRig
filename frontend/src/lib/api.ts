@@ -111,8 +111,19 @@ export const ordersApi = {
 export const purchaseOrdersApi = {
   list: (status?: string) =>
     api.get("/admin/purchase-orders", { params: status ? { status } : {} }),
+  create: (data: {
+    product_id: string;
+    supplier_id?: string;
+    quantity: number;
+  }) => api.post("/admin/purchase-orders", data),
   updateStatus: (id: string, status: string) =>
     api.put(`/admin/purchase-orders/${id}/status`, { status }),
+};
+
+// Inventory overview + restock history
+export const inventoryApi = {
+  overview: () => api.get("/admin/inventory/overview"),
+  restockHistory: () => api.get("/admin/restock-history"),
 };
 
 // PayPal payments — the only way an order is created now. The backend

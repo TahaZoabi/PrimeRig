@@ -19,6 +19,7 @@ const adminStats = require("../controllers/adminStatsController");
 const activity = require("../controllers/activityController");
 const payments = require("../controllers/paymentsController");
 const purchaseOrders = require("../controllers/purchaseOrdersController");
+const inventory = require("../controllers/inventoryController");
 
 // ============================================================
 // AUTH ROUTES
@@ -168,11 +169,33 @@ router.get(
   requireAdmin,
   purchaseOrders.getPurchaseOrders,
 );
+router.post(
+  "/admin/purchase-orders",
+  authenticate,
+  requireAdmin,
+  purchaseOrders.createPurchaseOrder,
+);
 router.put(
   "/admin/purchase-orders/:id/status",
   authenticate,
   requireAdmin,
   purchaseOrders.updatePurchaseOrderStatus,
+);
+
+// ============================================================
+// INVENTORY OVERVIEW + RESTOCK HISTORY
+// ============================================================
+router.get(
+  "/admin/inventory/overview",
+  authenticate,
+  requireAdmin,
+  inventory.getInventoryOverview,
+);
+router.get(
+  "/admin/restock-history",
+  authenticate,
+  requireAdmin,
+  inventory.getRestockHistory,
 );
 
 // ============================================================
