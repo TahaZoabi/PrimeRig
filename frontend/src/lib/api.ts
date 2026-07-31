@@ -116,8 +116,10 @@ export const purchaseOrdersApi = {
     supplier_id?: string;
     quantity: number;
   }) => api.post("/admin/purchase-orders", data),
-  updateStatus: (id: string, status: string) =>
-    api.put(`/admin/purchase-orders/${id}/status`, { status }),
+  cancel: (id: string) => api.put(`/admin/purchase-orders/${id}/cancel`),
+  simulateProgress: (id: string) =>
+    api.put(`/admin/purchase-orders/${id}/simulate-progress`),
+  receive: (id: string) => api.put(`/admin/purchase-orders/${id}/receive`),
 };
 
 // Inventory overview + restock history

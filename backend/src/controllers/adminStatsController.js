@@ -267,6 +267,10 @@ const getDashboardStats = async (req, res, next) => {
     );
 
     // ---- Inventory state (current stock levels — not period-scoped) ----
+    // "Low stock" is each product's own configured threshold (min_stock),
+    // never a fixed number — this must match the Inventory tab's definition
+    // exactly (see AdminInventory.tsx and getInventoryOverview), or a
+    // product can show as low-stock in one place and not the other.
     const [[{ totalProducts }]] = await pool.query(
       `SELECT COUNT(*) AS totalProducts FROM products WHERE is_active = 1`,
     );
@@ -275,16 +279,17 @@ const getDashboardStats = async (req, res, next) => {
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
        LEFT JOIN suppliers  s ON s.id = p.supplier_id
-       WHERE p.is_active = 1 AND p.stock <= 5
+       WHERE p.is_active = 1 AND p.stock <= p.min_stock
        ORDER BY p.stock ASC
        LIMIT 15`,
     );
+
     // ---- Inventory Alerts widget (current state — not period-scoped) ----
     const [[{ outOfStockCount }]] = await pool.query(
       `SELECT COUNT(*) AS outOfStockCount FROM products WHERE is_active = 1 AND stock = 0`,
     );
     const [[{ lowStockCount }]] = await pool.query(
-      `SELECT COUNT(*) AS lowStockCount FROM products WHERE is_active = 1 AND stock > 0 AND stock <= 5`,
+      `SELECT COUNT(*) AS lowStockCount FROM products WHERE is_active = 1 AND stock > 0 AND stock <= min_stock`,
     );
     const [[{ autoReordersTriggered }]] = await pool.query(
       `SELECT COUNT(*) AS autoReordersTriggered FROM purchase_orders`,
@@ -519,12 +524,12 @@ const getDashboardStats = async (req, res, next) => {
             category: p.category_name,
             supplier: p.supplier_name,
           })),
-        inventoryAlerts: {
-          outOfStock: Number(outOfStockCount),
-          lowStock: Number(lowStockCount),
-          autoReordersTriggered: Number(autoReordersTriggered),
-          pendingPurchaseOrders: Number(pendingPurchaseOrders),
-        },
+      },
+      inventoryAlerts: {
+        outOfStock: Number(outOfStockCount),
+        lowStock: Number(lowStockCount),
+        autoReordersTriggered: Number(autoReordersTriggered),
+        pendingPurchaseOrders: Number(pendingPurchaseOrders),
       },
     });
   } catch (err) {
