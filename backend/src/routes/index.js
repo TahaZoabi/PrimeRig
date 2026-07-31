@@ -176,10 +176,22 @@ router.post(
   purchaseOrders.createPurchaseOrder,
 );
 router.put(
-  "/admin/purchase-orders/:id/status",
+  "/admin/purchase-orders/:id/cancel",
   authenticate,
   requireAdmin,
-  purchaseOrders.updatePurchaseOrderStatus,
+  purchaseOrders.cancelPurchaseOrder,
+);
+router.put(
+  "/admin/purchase-orders/:id/simulate-progress",
+  authenticate,
+  requireAdmin,
+  purchaseOrders.simulateSupplierProgress,
+);
+router.put(
+  "/admin/purchase-orders/:id/receive",
+  authenticate,
+  requireAdmin,
+  purchaseOrders.receivePurchaseOrder,
 );
 
 // ============================================================
