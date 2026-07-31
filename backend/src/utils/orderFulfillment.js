@@ -38,7 +38,7 @@ class ValidationError extends Error {
 async function lockAndValidateCart(conn, userId) {
   const [cartItems] = await conn.query(
     `SELECT ci.product_id, ci.quantity, p.price, p.stock, p.name, p.is_active,
-            p.auto_reorder, p.min_stock, p.reorder_quantity,
+            p.auto_reorder, p.min_stock, p.target_stock_level,
             p.preferred_supplier_id, p.supplier_id
      FROM cart_items ci
      JOIN products p ON p.id = ci.product_id
@@ -78,7 +78,11 @@ async function lockAndValidateCart(conn, userId) {
  * After decrementing a product's stock, create an internal Purchase Order
  * if it's now at/below its minimum and Auto Reorder is enabled — but never
  * if a Pending purchase order already exists for that product. This never
- * contacts a real supplier; it only records that a human should reorder.
+ * contacts a real supplier; it only records that a human should act on.
+ *
+ * The order quantity tops the product back up to its Target Stock Level
+ * (not a fixed amount) — e.g. target 20, current stock 3 after this sale
+ * orders 17, not a flat number regardless of how far below target it is.
  */
 async function maybeCreatePurchaseOrder(conn, item, newStock) {
   if (!item.auto_reorder || newStock > item.min_stock) return;
@@ -92,11 +96,11 @@ async function maybeCreatePurchaseOrder(conn, item, newStock) {
   const supplierId = item.preferred_supplier_id || item.supplier_id;
   if (!supplierId) return; // nothing sensible to order from
 
-  const quantity = item.reorder_quantity > 0 ? item.reorder_quantity : 1;
+  const quantity = Math.max(item.target_stock_level - newStock, 1);
   const poId = uuidv4();
   await conn.query(
-    `INSERT INTO purchase_orders (id, product_id, supplier_id, quantity, status)
-     VALUES (?, ?, ?, ?, 'pending')`,
+    `INSERT INTO purchase_orders (id, product_id, supplier_id, quantity, status, created_by)
+     VALUES (?, ?, ?, ?, 'pending', 'auto')`,
     [poId, item.product_id, supplierId, quantity],
   );
 

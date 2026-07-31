@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "seed": "node src/seed.js"
+    "seed": "node src/seed.js",
+    "seed:inventory": "node src/seedInventoryWorkflow.js"
   },
   "dependencies": {
     "@paypal/checkout-server-sdk": "^1.0.3",
