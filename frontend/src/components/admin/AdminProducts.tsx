@@ -48,6 +48,8 @@ interface ProductForm {
   min_stock: string;
   target_stock_level: string;
   preferred_supplier_id: string;
+  gpu_length_mm: string;
+  max_gpu_length_mm: string;
 }
 
 interface AdminProduct {
@@ -70,6 +72,7 @@ interface AdminProduct {
   min_stock: number;
   target_stock_level: number;
   preferred_supplier_id: string | null;
+  specs: Record<string, string> | null;
 }
 
 interface DuplicateInfo {
@@ -95,6 +98,8 @@ const emptyForm: ProductForm = {
   min_stock: "",
   target_stock_level: "",
   preferred_supplier_id: "",
+  gpu_length_mm: "",
+  max_gpu_length_mm: "",
 };
 
 const AdminProducts = () => {
@@ -159,6 +164,17 @@ const AdminProducts = () => {
           ? Number(form.target_stock_level)
           : 0,
         preferred_supplier_id: form.preferred_supplier_id || null,
+        specs:
+          form.gpu_length_mm || form.max_gpu_length_mm
+            ? {
+                ...(form.gpu_length_mm
+                  ? { gpu_length_mm: form.gpu_length_mm }
+                  : {}),
+                ...(form.max_gpu_length_mm
+                  ? { max_gpu_length_mm: form.max_gpu_length_mm }
+                  : {}),
+              }
+            : null,
         ...(opts.confirmStockIncreaseFor
           ? { confirmStockIncreaseFor: opts.confirmStockIncreaseFor }
           : {}),
@@ -263,8 +279,12 @@ const AdminProducts = () => {
       form_factor: p.form_factor ?? "",
       auto_reorder: p.auto_reorder,
       min_stock: p.min_stock ? String(p.min_stock) : "",
-      target_stock_level: p.target_stock_level ? String(p.target_stock_level) : "",
+      target_stock_level: p.target_stock_level
+        ? String(p.target_stock_level)
+        : "",
       preferred_supplier_id: p.preferred_supplier_id ?? "",
+      gpu_length_mm: p.specs?.gpu_length_mm ?? "",
+      max_gpu_length_mm: p.specs?.max_gpu_length_mm ?? "",
     });
     setOpen(true);
   };
@@ -513,6 +533,38 @@ const AdminProducts = () => {
                   onChange={set("form_factor")}
                 />
               </div>
+              {(() => {
+                const categoryName =
+                  categories
+                    ?.find(
+                      (c: { id: string; name: string }) =>
+                        c.id === form.category_id,
+                    )
+                    ?.name?.toLowerCase() ?? "";
+                if (categoryName.includes("gpu")) {
+                  return (
+                    <Input
+                      type="number"
+                      placeholder="GPU Length (mm) — used by the PC Builder's case-fit check"
+                      value={form.gpu_length_mm}
+                      onChange={set("gpu_length_mm")}
+                      min="0"
+                    />
+                  );
+                }
+                if (categoryName.includes("case")) {
+                  return (
+                    <Input
+                      type="number"
+                      placeholder="Max GPU Length (mm) — used by the PC Builder's case-fit check"
+                      value={form.max_gpu_length_mm}
+                      onChange={set("max_gpu_length_mm")}
+                      min="0"
+                    />
+                  );
+                }
+                return null;
+              })()}
 
               {/* Inventory replenishment */}
               <p className="text-xs font-semibold text-muted-foreground pt-2">
@@ -572,9 +624,10 @@ const AdminProducts = () => {
               {form.auto_reorder && (
                 <p className="text-xs text-muted-foreground">
                   When stock reaches {form.min_stock || "0"} or below, a
-                  Purchase Order topping stock back up to {form.target_stock_level || "0"}{" "}
-                  units will be created automatically — this never places a
-                  real order with the supplier, it just flags it for you to action.
+                  Purchase Order topping stock back up to{" "}
+                  {form.target_stock_level || "0"} units will be created
+                  automatically — this never places a real order with the
+                  supplier, it just flags it for you to action.
                 </p>
               )}
 
