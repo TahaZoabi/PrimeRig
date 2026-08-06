@@ -33,7 +33,7 @@ async function topProductForWindow(period) {
      FROM order_items oi
      JOIN orders o ON o.id = oi.order_id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql}
+     WHERE ${rangeSql} AND o.status != 'cancelled'
      GROUP BY p.id, p.name
      ORDER BY unitsSold DESC
      LIMIT 1`,
@@ -78,17 +78,27 @@ const getDashboardStats = async (req, res, next) => {
       start ? `${col} >= ? AND ${col} <= ?` : `${col} <= ?`;
     const rangeParams = start ? [start, end] : [end];
 
-    // ---- Summary: revenue, order count, highest/lowest, pending/completed ----
+    // ---- Summary: revenue, order count, highest/lowest, completed ----
+    // Cancelled orders are excluded from revenue/orderCount/highest/lowest —
+    // a cancelled order never completed as a sale, so it must not inflate
+    // any dollar or unit metric. completedOrders is counted by its own
+    // status condition regardless, so it's unaffected.
+    //
+    // No "pendingOrders" here: since orders are only ever created via the
+    // verified PayPal capture flow (see orderFulfillment.js), every order is
+    // inserted directly as "processing" — status "pending" is not reachable
+    // by current business logic, so a live pending-order count would always
+    // read ~0 and no longer means anything. See ordersByStatus.processing /
+    // ordersByStatus.shipped below for the metrics that replaced it.
     const [[summaryRow]] = await pool.query(
       `SELECT
          COALESCE(SUM(total), 0)                                AS revenue,
          COUNT(*)                                                AS orderCount,
          COALESCE(MAX(total), 0)                                AS highestOrder,
          COALESCE(MIN(total), 0)                                AS lowestOrder,
-         SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END)   AS pendingOrders,
          SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END)   AS completedOrders
        FROM orders
-       WHERE ${rangeSql("created_at")}`,
+       WHERE ${rangeSql("created_at")} AND status != 'cancelled'`,
       rangeParams,
     );
 
@@ -97,7 +107,7 @@ const getDashboardStats = async (req, res, next) => {
       `SELECT COALESCE(SUM(oi.quantity), 0) AS productsSold
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
-       WHERE ${rangeSql("o.created_at")}`,
+       WHERE ${rangeSql("o.created_at")} AND o.status != 'cancelled'`,
       rangeParams,
     );
 
@@ -105,7 +115,7 @@ const getDashboardStats = async (req, res, next) => {
     let revenueGrowthPct = null;
     if (prevStart) {
       const [[prevRow]] = await pool.query(
-        `SELECT COALESCE(SUM(total), 0) AS revenue FROM orders WHERE created_at >= ? AND created_at < ?`,
+        `SELECT COALESCE(SUM(total), 0) AS revenue FROM orders WHERE created_at >= ? AND created_at < ? AND status != 'cancelled'`,
         [prevStart, prevEnd],
       );
       const prevRevenue = Number(prevRow.revenue);
@@ -121,7 +131,7 @@ const getDashboardStats = async (req, res, next) => {
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
        JOIN products p ON p.id = oi.product_id
-       WHERE ${rangeSql("o.created_at")}
+       WHERE ${rangeSql("o.created_at")} AND o.status != 'cancelled'
        GROUP BY p.id, p.name
        ORDER BY unitsSold DESC
        LIMIT 5`,
@@ -135,7 +145,7 @@ const getDashboardStats = async (req, res, next) => {
        JOIN orders o ON o.id = oi.order_id
        JOIN products p ON p.id = oi.product_id
        JOIN categories c ON c.id = p.category_id
-       WHERE ${rangeSql("o.created_at")}
+       WHERE ${rangeSql("o.created_at")} AND o.status != 'cancelled'
        GROUP BY c.id, c.name
        ORDER BY unitsSold DESC
        LIMIT 8`,
@@ -149,7 +159,7 @@ const getDashboardStats = async (req, res, next) => {
        JOIN orders o ON o.id = oi.order_id
        JOIN products p ON p.id = oi.product_id
        JOIN suppliers s ON s.id = p.supplier_id
-       WHERE ${rangeSql("o.created_at")}
+       WHERE ${rangeSql("o.created_at")} AND o.status != 'cancelled'
        GROUP BY s.id, s.name
        ORDER BY unitsSold DESC
        LIMIT 5`,
@@ -157,6 +167,9 @@ const getDashboardStats = async (req, res, next) => {
     );
 
     // ---- Orders by status, in range ----
+    // Intentionally UNFILTERED by status — this is the one place cancelled
+    // orders are meant to be counted, since the whole point is to show how
+    // many fall into each status including cancelled.
     const [ordersByStatusRows] = await pool.query(
       `SELECT status, COUNT(*) AS count
        FROM orders
@@ -170,7 +183,7 @@ const getDashboardStats = async (req, res, next) => {
       `SELECT u.id, u.full_name, u.email, COUNT(*) AS orderCount, SUM(o.total) AS totalSpent
        FROM orders o
        JOIN users u ON u.id = o.user_id
-       WHERE ${rangeSql("o.created_at")}
+       WHERE ${rangeSql("o.created_at")} AND o.status != 'cancelled'
        GROUP BY u.id, u.full_name, u.email
        ORDER BY orderCount DESC, totalSpent DESC
        LIMIT 1`,
@@ -178,27 +191,29 @@ const getDashboardStats = async (req, res, next) => {
     );
 
     // ---- New vs. returning customers (+ bucketed new-customers-over-time) ----
-    // Definition (derived from the orders table only — the users table has no
-    // signup-date column available to us): a customer is "new" in this period
-    // if their earliest order OVERALL falls inside the period; "returning" if
-    // they have an order in the period AND an earlier order before it started.
+    // Definition: among customers with at least one NON-CANCELLED order in
+    // the selected period, a customer is "new" if that's their only
+    // non-cancelled order ever (as of now); "returning" if they have 2+
+    // non-cancelled orders ever, full stop — independent of the period's
+    // start date.
     let newCustomers = 0;
     let returningCustomers = 0;
     const newCustomerDates = [];
     {
-      const [firstOrders] = await pool.query(
-        `SELECT user_id, MIN(created_at) AS firstOrderAt
-         FROM orders
-         WHERE user_id IN (
-           SELECT DISTINCT user_id FROM orders WHERE ${rangeSql("created_at")}
-         )
-         GROUP BY user_id`,
+      const [customerActivity] = await pool.query(
+        `SELECT o.user_id, COUNT(*) AS lifetimeOrders, MIN(o.created_at) AS firstOrderAt
+         FROM orders o
+         WHERE o.status != 'cancelled'
+           AND o.user_id IN (
+             SELECT DISTINCT user_id FROM orders
+             WHERE status != 'cancelled' AND ${rangeSql("created_at")}
+           )
+         GROUP BY o.user_id`,
         rangeParams,
       );
-      const periodStartMs = start ? start.getTime() : -Infinity;
-      firstOrders.forEach((row) => {
-        const firstMs = new Date(row.firstOrderAt).getTime();
-        if (firstMs >= periodStartMs) {
+      customerActivity.forEach((row) => {
+        const lifetimeOrders = Number(row.lifetimeOrders);
+        if (lifetimeOrders <= 1) {
           newCustomers += 1;
           newCustomerDates.push(new Date(row.firstOrderAt));
         } else {
@@ -234,7 +249,7 @@ const getDashboardStats = async (req, res, next) => {
     const [series] = await pool.query(
       `SELECT ${bucketExpr} AS bucket, COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
        FROM orders
-       WHERE ${rangeSql("created_at")}
+       WHERE ${rangeSql("created_at")} AND status != 'cancelled'
        GROUP BY bucket
        ORDER BY bucket ASC`,
       rangeParams,
@@ -300,7 +315,7 @@ const getDashboardStats = async (req, res, next) => {
 
     // ---- All-time totals (never period-scoped — these describe the whole business) ----
     const [[allTimeOrders]] = await pool.query(
-      `SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orderCount FROM orders`,
+      `SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orderCount FROM orders WHERE status != 'cancelled'`,
     );
     const [[{ totalCustomers }]] = await pool.query(
       `SELECT COUNT(*) AS totalCustomers FROM users WHERE role = 'user'`,
@@ -325,50 +340,82 @@ const getDashboardStats = async (req, res, next) => {
     );
 
     // ---- Products that have never been sold (all-time, active catalog only) ----
+    // "Sold" means a non-cancelled order referenced it — a product that only
+    // ever appeared in a cancelled order was never actually sold.
     const [[{ neverSoldCount }]] = await pool.query(
       `SELECT COUNT(*) AS neverSoldCount
        FROM products p
        WHERE p.is_active = 1
-         AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id)`,
+         AND NOT EXISTS (
+           SELECT 1 FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+           WHERE oi.product_id = p.id AND o.status != 'cancelled'
+         )`,
     );
     const [neverSoldRows] = await pool.query(
       `SELECT p.id, p.name, p.created_at
        FROM products p
        WHERE p.is_active = 1
-         AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+           WHERE oi.product_id = p.id AND o.status != 'cancelled'
+         )
        ORDER BY p.created_at ASC
        LIMIT 5`,
     );
 
-    // ---- Fastest-growing category (period-over-period, only when there's a comparable previous period) ----
+    // ---- Fastest-growing category ----
+    // Compares each category's revenue in the first half of the CURRENTLY
+    // SELECTED range against its second half, using the same effective
+    // start as the charts (seriesStart: the real earliest order date for
+    // "All Time", otherwise the period's own start).
+    //
+    // The previous version compared the selected period against an
+    // external period immediately BEFORE it. That's structurally unusable
+    // for "All Time" (there is no period before "all time", so this was
+    // unconditionally skipped) and, for any bounded period, only produces
+    // a value when that earlier window already had revenue for a category
+    // — which is normally NOT the case for a store whose orders are all
+    // recent, i.e. the exact situation for anyone actively testing this
+    // app. An internal first-half-vs-second-half split needs no data
+    // outside the range being viewed, so it can produce a real answer as
+    // soon as a category has any sales spread across the window — while
+    // still failing honestly (null, not a fabricated number) if there
+    // genuinely isn't enough of a spread yet.
     let fastestGrowingCategory = null;
-    if (prevStart) {
-      const [prevCategorySales] = await pool.query(
-        `SELECT c.id, SUM(oi.quantity * oi.price) AS revenue
-         FROM order_items oi
-         JOIN orders o ON o.id = oi.order_id
-         JOIN products p ON p.id = oi.product_id
-         JOIN categories c ON c.id = p.category_id
-         WHERE o.created_at >= ? AND o.created_at < ?
-         GROUP BY c.id`,
-        [prevStart, prevEnd],
+    {
+      const rangeStart = seriesStart;
+      const midpoint = new Date(
+        rangeStart.getTime() + (end.getTime() - rangeStart.getTime()) / 2,
       );
-      const prevRevenueById = {};
-      prevCategorySales.forEach((row) => {
-        prevRevenueById[row.id] = Number(row.revenue);
-      });
-      let best = null;
-      categorySales.forEach((c) => {
-        const prevRevenue = prevRevenueById[c.id] || 0;
-        const currRevenue = Number(c.revenue);
-        if (prevRevenue > 0) {
-          const growthPct = ((currRevenue - prevRevenue) / prevRevenue) * 100;
-          if (!best || growthPct > best.growthPct) {
-            best = { id: c.id, name: c.name, growthPct };
+
+      if (midpoint.getTime() > rangeStart.getTime()) {
+        const [halves] = await pool.query(
+          `SELECT c.id, c.name,
+                  SUM(CASE WHEN o.created_at < ? THEN oi.quantity * oi.price ELSE 0 END) AS firstHalfRevenue,
+                  SUM(CASE WHEN o.created_at >= ? THEN oi.quantity * oi.price ELSE 0 END) AS secondHalfRevenue
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+           JOIN products p ON p.id = oi.product_id
+           JOIN categories c ON c.id = p.category_id
+           WHERE o.created_at >= ? AND o.created_at <= ? AND o.status != 'cancelled'
+           GROUP BY c.id, c.name`,
+          [midpoint, midpoint, rangeStart, end],
+        );
+        let best = null;
+        halves.forEach((row) => {
+          const firstHalf = Number(row.firstHalfRevenue);
+          const secondHalf = Number(row.secondHalfRevenue);
+          if (firstHalf > 0) {
+            const growthPct = ((secondHalf - firstHalf) / firstHalf) * 100;
+            if (!best || growthPct > best.growthPct) {
+              best = { id: row.id, name: row.name, growthPct };
+            }
           }
-        }
-      });
-      fastestGrowingCategory = best;
+        });
+        fastestGrowingCategory = best;
+      }
     }
 
     // ---- Quick-insight top product by fixed windows (independent of selected period) ----
@@ -422,7 +469,6 @@ const getDashboardStats = async (req, res, next) => {
         avgOrderValue,
         highestOrder: Number(summaryRow.highestOrder),
         lowestOrder: Number(summaryRow.lowestOrder),
-        pendingOrders: Number(summaryRow.pendingOrders),
         completedOrders: Number(summaryRow.completedOrders),
         revenuePerDay: revenue / daysDiff,
         ordersPerDay: orderCount / daysDiff,

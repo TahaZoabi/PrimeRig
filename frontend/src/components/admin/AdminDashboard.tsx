@@ -162,7 +162,6 @@ interface DashboardStats {
     avgOrderValue: number;
     highestOrder: number;
     lowestOrder: number;
-    pendingOrders: number;
     completedOrders: number;
     revenuePerDay: number;
     ordersPerDay: number;
@@ -431,8 +430,8 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
       bg: "bg-indigo-50 dark:bg-indigo-900/20",
     },
     {
-      label: "Pending Orders",
-      value: String(summary.pendingOrders),
+      label: "Processing Orders",
+      value: String(ordersByStatus.processing ?? 0),
       sub: undefined,
       icon: Clock,
       color: "text-yellow-600",
@@ -608,8 +607,8 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
           />
           <MiniStat
             icon={Clock}
-            label="Pending Orders"
-            value={String(ordersByStatus.pending ?? 0)}
+            label="Orders In Transit"
+            value={String(ordersByStatus.shipped ?? 0)}
             color="text-blue-600"
             bg="bg-blue-50 dark:bg-blue-900/20"
           />
