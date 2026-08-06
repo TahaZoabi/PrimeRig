@@ -5,9 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "seed": "node src/seed.js",
-    "seed:inventory": "node src/seedInventoryWorkflow.js"
+    "dev": "nodemon src/index.js"
   },
   "dependencies": {
     "@paypal/checkout-server-sdk": "^1.0.3",
