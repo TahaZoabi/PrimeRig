@@ -32,6 +32,19 @@ export interface PeriodFilterState {
 const AdminPage = () => {
   const { isAdmin, loading } = useAuth();
 
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  // Set by the Overview dashboard's "View Product" action: switches to the
+  // Products tab and tells it which product to open the edit dialog for.
+  // Cleared once AdminProducts has consumed it, so revisiting the tab later
+  // doesn't reopen the same dialog.
+  const [pendingEditProductId, setPendingEditProductId] = useState<string | null>(null);
+
+  const goToProduct = (productId: string) => {
+    setPendingEditProductId(productId);
+    setActiveTab("products");
+  };
+
   // Lifted up here (rather than kept as local state inside each tab) so the
   // selected filter survives switching tabs. Radix's Tabs.Content unmounts
   // inactive tabs by default, which would otherwise reset each tab's filter
@@ -59,7 +72,7 @@ const AdminPage = () => {
         </p>
       </div>
 
-      <Tabs defaultValue="dashboard">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6 flex-wrap h-auto gap-1">
           <TabsTrigger value="dashboard" className="flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4" /> Overview
@@ -85,10 +98,16 @@ const AdminPage = () => {
           <AdminDashboard
             filter={dashboardFilter}
             onFilterChange={setDashboardFilter}
+            onViewProduct={goToProduct}
+            onViewOrders={() => setActiveTab("orders")}
+            onViewInventory={() => setActiveTab("inventory")}
           />
         </TabsContent>
         <TabsContent value="products">
-          <AdminProducts />
+          <AdminProducts
+            initialEditProductId={pendingEditProductId}
+            onInitialEditHandled={() => setPendingEditProductId(null)}
+          />
         </TabsContent>
         <TabsContent value="categories">
           <AdminCategories />

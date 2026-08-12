@@ -8,8 +8,9 @@
  * Filter state is owned by AdminPage (see PeriodFilterState) so it survives
  * switching tabs, and is passed down here as controlled props.
  */
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { adminStatsApi } from "@/lib/api";
+import { adminStatsApi, inventoryApi, ordersApi, suppliersApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,8 @@ import PeriodFilter, {
   type PeriodOption,
 } from "@/components/admin/PeriodFilter";
 import RecentActivity from "@/components/admin/RecentActivity";
+import OrderDetailsModal from "@/components/admin/OrderDetailsModal";
+import OrderFromSupplierDialog from "@/components/admin/OrderFromSupplierDialog";
 import type { PeriodFilterState } from "@/pages/AdminPage";
 import {
   ShoppingBag,
@@ -42,6 +45,9 @@ import {
   Rocket,
   XCircle,
   PackageX,
+  Wrench,
+  Eye,
+  ClipboardList,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -217,6 +223,12 @@ interface DashboardStats {
     lowStock: StockItem[];
     outOfStock: StockItem[];
   };
+  inventoryAlerts: {
+    outOfStock: number;
+    lowStock: number;
+    autoReordersTriggered: number;
+    pendingPurchaseOrders: number;
+  };
 }
 
 const fmtCurrency = (n: number) => `$${n.toFixed(2)}`;
@@ -234,9 +246,21 @@ const fmtAxisDate = (date: string, granularity: "day" | "month") =>
 interface AdminDashboardProps {
   filter: PeriodFilterState;
   onFilterChange: (next: PeriodFilterState) => void;
+  /** Switches to the Products tab and opens this product's edit dialog. */
+  onViewProduct: (productId: string) => void;
+  /** Switches to the Orders tab. */
+  onViewOrders: () => void;
+  /** Switches to the Inventory tab. */
+  onViewInventory: () => void;
 }
 
-const AdminDashboard = ({ filter, onFilterChange }: AdminDashboardProps) => {
+const AdminDashboard = ({
+  filter,
+  onFilterChange,
+  onViewProduct,
+  onViewOrders,
+  onViewInventory,
+}: AdminDashboardProps) => {
   const { period, customStart, customEnd } = filter;
   const customReady = customStart !== "" && customEnd !== "";
   const canQuery = period !== "custom" || customReady;
@@ -297,7 +321,12 @@ const AdminDashboard = ({ filter, onFilterChange }: AdminDashboardProps) => {
           onRetry={() => refetch()}
         />
       ) : (
-        <DashboardBody stats={stats} />
+        <DashboardBody
+          stats={stats}
+          onViewProduct={onViewProduct}
+          onViewOrders={onViewOrders}
+          onViewInventory={onViewInventory}
+        />
       )}
     </div>
   );
@@ -378,7 +407,17 @@ const MiniStat = ({
 );
 
 /** Renders everything once stats have loaded successfully. */
-const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
+const DashboardBody = ({
+  stats,
+  onViewProduct,
+  onViewOrders,
+  onViewInventory,
+}: {
+  stats: DashboardStats;
+  onViewProduct: (productId: string) => void;
+  onViewOrders: () => void;
+  onViewInventory: () => void;
+}) => {
   const {
     summary,
     totals,
@@ -393,8 +432,69 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
     topProductByWindow,
     charts,
     recentOrders,
-    inventory,
+    inventoryAlerts,
   } = stats;
+
+  // ── "Needs Attention" data — deliberately NOT scoped to the dashboard's
+  // selected period: a processing order from 6 weeks ago still needs action
+  // regardless of which period the admin happens to be viewing. Reuses the
+  // exact same endpoints as the Inventory and Orders tabs (no new backend
+  // logic), so this can never disagree with what those tabs show. ──
+  const { data: inventoryOverview } = useQuery({
+    queryKey: ["inventory-overview"],
+    queryFn: async () => {
+      const { data } = await inventoryApi.overview();
+      return data as Array<{
+        id: string;
+        name: string;
+        stock: number;
+        min_stock: number;
+        supplier_id: string | null;
+        preferred_supplier_id: string | null;
+        category_name: string | null;
+        supplier_name: string | null;
+      }>;
+    },
+  });
+  const { data: suppliersForRestock } = useQuery({
+    queryKey: ["admin-suppliers"],
+    queryFn: async () => {
+      const { data } = await suppliersApi.adminList();
+      return data;
+    },
+  });
+  const { data: ordersNeedingAttention } = useQuery({
+    queryKey: ["orders-needing-attention"],
+    queryFn: async () => {
+      const { data } = await ordersApi.adminList({
+        period: "all",
+        status: "processing,shipped",
+      });
+      return data as Array<{
+        id: string;
+        status: string;
+        total: number;
+        created_at: string;
+        customer_name: string | null;
+      }>;
+    },
+  });
+
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [restockProduct, setRestockProduct] = useState<{
+    id: string;
+    name: string;
+    supplier_id?: string | null;
+    preferred_supplier_id?: string | null;
+  } | null>(null);
+
+  const lowStockItems = (inventoryOverview ?? []).filter(
+    (p) => p.stock > 0 && p.stock <= p.min_stock && p.min_stock > 0,
+  );
+  const outOfStockItems = (inventoryOverview ?? []).filter((p) => p.stock === 0);
+  const urgentOrders = ordersNeedingAttention ?? [];
+  const hasAttentionItems =
+    lowStockItems.length > 0 || outOfStockItems.length > 0 || urgentOrders.length > 0;
 
   const mainStats = [
     {
@@ -567,6 +667,155 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
         </div>
       </div>
 
+      {/* Needs Attention — the control-center section: everything here is
+          directly actionable without leaving the Overview (or, for "View
+          Product", with one tab switch straight into the existing edit
+          dialog). Nothing here duplicates data the admin has to hunt for —
+          it's the same Inventory/Orders data, just surfaced with an action. */}
+      <Card className="border-amber-200 dark:border-amber-900/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            Needs Attention
+            {hasAttentionItems && (
+              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+                {outOfStockItems.length + lowStockItems.length + urgentOrders.length}
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!hasAttentionItems ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              🎉 All caught up — no stock issues or orders waiting on you right now.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Stock issues */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Stock Issues
+                  </p>
+                  {(lowStockItems.length > 5 || outOfStockItems.length > 5) && (
+                    <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onViewInventory}>
+                      View All in Inventory
+                    </Button>
+                  )}
+                </div>
+                {lowStockItems.length === 0 && outOfStockItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">Stock levels look healthy.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {[...outOfStockItems, ...lowStockItems].slice(0, 5).map((p) => {
+                      const isOut = p.stock === 0;
+                      return (
+                        <div
+                          key={p.id}
+                          className={`rounded-md border p-2.5 ${
+                            isOut ? "bg-red-50 border-red-200 dark:bg-red-900/10" : "bg-amber-50 border-amber-200 dark:bg-amber-900/10"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium flex items-center gap-1.5 line-clamp-1">
+                                {isOut ? "🔴" : "⚠️"} {p.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {isOut ? "Out of stock" : `${p.stock} unit${p.stock === 1 ? "" : "s"} remaining`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  setRestockProduct({
+                                    id: p.id,
+                                    name: p.name,
+                                    supplier_id: p.supplier_id,
+                                    preferred_supplier_id: p.preferred_supplier_id,
+                                  })
+                                }
+                              >
+                                <Wrench className="h-3 w-3 mr-1" /> Restock
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => onViewProduct(p.id)}
+                              >
+                                <Eye className="h-3 w-3 mr-1" /> View
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {inventoryAlerts.pendingPurchaseOrders > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
+                    <ClipboardList className="h-3.5 w-3.5" />
+                    {inventoryAlerts.pendingPurchaseOrders} purchase order
+                    {inventoryAlerts.pendingPurchaseOrders === 1 ? "" : "s"} already awaiting supplier action —
+                    see the Inventory tab.
+                  </p>
+                )}
+              </div>
+
+              {/* Orders requiring attention */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Orders Requiring Attention
+                  </p>
+                  {urgentOrders.length > 5 && (
+                    <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onViewOrders}>
+                      View All Orders
+                    </Button>
+                  )}
+                </div>
+                {urgentOrders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No orders currently waiting on you.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {urgentOrders.slice(0, 5).map((order) => (
+                      <div key={order.id} className="rounded-md border p-2.5 bg-blue-50 border-blue-200 dark:bg-blue-900/10">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium line-clamp-1">
+                              #{order.id.slice(0, 8).toUpperCase()}
+                              {order.customer_name ? ` · ${order.customer_name}` : ""}
+                            </p>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              {fmtCurrency(order.total)}
+                              <Badge variant="outline" className={`${statusStyle[order.status] ?? ""} text-xs capitalize py-0`}>
+                                {order.status}
+                              </Badge>
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs flex-shrink-0"
+                            onClick={() => setSelectedOrderId(order.id)}
+                          >
+                            <Eye className="h-3 w-3 mr-1" /> View Order
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Quick insights */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
@@ -597,13 +846,6 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
             }
             color="text-pink-600"
             bg="bg-pink-50 dark:bg-pink-900/20"
-          />
-          <MiniStat
-            icon={AlertTriangle}
-            label="Low Stock Alerts"
-            value={String(inventory.lowStock.length)}
-            color="text-amber-600"
-            bg="bg-amber-50 dark:bg-amber-900/20"
           />
           <MiniStat
             icon={Clock}
@@ -1092,8 +1334,8 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
         </Card>
       </div>
 
-      {/* Recent orders + stock alerts + recent activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Recent orders (history — lower priority than Needs Attention above) + recent activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -1140,72 +1382,23 @@ const DashboardBody = ({ stats }: { stats: DashboardStats }) => {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-orange-500" /> Stock Alerts
-              <span className="ml-auto text-xs font-normal text-muted-foreground">
-                {inventory.totalProducts} products in catalog
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {inventory.lowStock.length === 0 &&
-            inventory.outOfStock.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                All products have healthy stock levels 🎉
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {inventory.outOfStock.slice(0, 5).map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between py-1.5 border-b last:border-0"
-                  >
-                    <div>
-                      <p className="text-sm font-medium line-clamp-1">
-                        {p.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {p.category} · {p.supplier ?? "No supplier"}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="bg-red-50 text-red-700 border-red-200 text-xs"
-                    >
-                      Out of stock
-                    </Badge>
-                  </div>
-                ))}
-                {inventory.lowStock.slice(0, 5).map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between py-1.5 border-b last:border-0"
-                  >
-                    <div>
-                      <p className="text-sm font-medium line-clamp-1">
-                        {p.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {p.category} · {p.supplier ?? "No supplier"}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="bg-red-100 text-red-800 border-red-300 text-xs font-semibold"
-                    >
-                      {p.stock} left
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         <RecentActivity />
       </div>
+
+      <OrderDetailsModal
+        orderId={selectedOrderId}
+        open={!!selectedOrderId}
+        onOpenChange={(o) => {
+          if (!o) setSelectedOrderId(null);
+        }}
+      />
+      <OrderFromSupplierDialog
+        product={restockProduct}
+        suppliers={suppliersForRestock}
+        onOpenChange={(o) => {
+          if (!o) setRestockProduct(null);
+        }}
+      />
     </div>
   );
 };

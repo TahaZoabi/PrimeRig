@@ -72,7 +72,7 @@ const getMyOrders = async (req, res, next) => {
  */
 const getAllOrders = async (req, res, next) => {
   try {
-    const { period = "all", startDate, endDate } = req.query;
+    const { period = "all", startDate, endDate, status } = req.query;
 
     if (!PERIODS.includes(period)) {
       return res.status(400).json({ error: "Invalid period" });
@@ -81,6 +81,23 @@ const getAllOrders = async (req, res, next) => {
       return res.status(400).json({
         error: "startDate and endDate are required for a custom range",
       });
+    }
+
+    // Optional comma-separated status filter, e.g. "?status=processing,shipped"
+    // — used by the Overview dashboard's "Needs Attention" section to pull
+    // only orders that still need action, without a separate endpoint.
+    let statusList = null;
+    if (status) {
+      statusList = String(status)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const invalid = statusList.filter((s) => !ORDER_STATUSES.includes(s));
+      if (invalid.length) {
+        return res
+          .status(400)
+          .json({ error: `Invalid status: ${invalid.join(", ")}` });
+      }
     }
 
     let start, end;
@@ -97,6 +114,8 @@ const getAllOrders = async (req, res, next) => {
       ? "o.created_at >= ? AND o.created_at <= ?"
       : "o.created_at <= ?";
     const rangeParams = start ? [start, end] : [end];
+    const statusSql = statusList ? "AND o.status IN (?)" : "";
+    const queryParams = statusList ? [...rangeParams, statusList] : rangeParams;
 
     const [orders] = await pool.query(
       `SELECT o.*, u.full_name AS customer_name, u.email AS customer_email,
@@ -104,9 +123,9 @@ const getAllOrders = async (req, res, next) => {
        FROM orders o
        LEFT JOIN users u ON u.id = o.user_id
        LEFT JOIN profiles p ON p.user_id = o.user_id
-       WHERE ${rangeSql}
+       WHERE ${rangeSql} ${statusSql}
        ORDER BY o.created_at DESC`,
-      rangeParams,
+      queryParams,
     );
 
     if (!orders.length) return res.json([]);
