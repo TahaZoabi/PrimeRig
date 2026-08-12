@@ -100,6 +100,7 @@ export const ordersApi = {
     period?: string;
     startDate?: string;
     endDate?: string;
+    status?: string;
   }) => api.get("/admin/orders", { params }),
   getDetails: (id: string) => api.get(`/admin/orders/${id}`),
   updateStatus: (id: string, status: string) =>

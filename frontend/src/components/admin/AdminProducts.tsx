@@ -5,7 +5,7 @@
  * Features: list active/archived separately, add, edit, archive, restore.
  * All fields including PC-builder compatibility fields are editable.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { productsApi, categoriesApi, suppliersApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -102,7 +102,21 @@ const emptyForm: ProductForm = {
   max_gpu_length_mm: "",
 };
 
-const AdminProducts = () => {
+interface AdminProductsProps {
+  /** Set by the Overview dashboard's "View Product" action — when present,
+   * opens that product's edit dialog as soon as the product list has
+   * loaded, reusing the exact same openEdit() flow as clicking Edit
+   * directly on a product card. */
+  initialEditProductId?: string | null;
+  /** Called once the pending edit has been opened, so the parent can clear
+   * it — otherwise revisiting this tab later would reopen the same dialog. */
+  onInitialEditHandled?: () => void;
+}
+
+const AdminProducts = ({
+  initialEditProductId,
+  onInitialEditHandled,
+}: AdminProductsProps = {}) => {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -121,6 +135,16 @@ const AdminProducts = () => {
       return data;
     },
   });
+
+  // Consume a pending "open this product's edit dialog" request from the
+  // Overview dashboard, once the product list is available.
+  useEffect(() => {
+    if (!initialEditProductId || !products) return;
+    const product = products.find((p) => p.id === initialEditProductId);
+    if (product) openEdit(product);
+    onInitialEditHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialEditProductId, products]);
 
   const activeProducts = products?.filter((p) => p.is_active) ?? [];
   const archivedProducts = products?.filter((p) => !p.is_active) ?? [];
